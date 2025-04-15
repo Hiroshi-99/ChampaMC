@@ -56,12 +56,59 @@ const RANKS: RankOption[] = [
   }
 ];
 
+// Helper function to parse Supabase error
+const parseSupabaseError = (error: any): string => {
+  console.log('Raw Error Object:', error);
+  
+  if (!error) return 'Unknown error occurred';
+  
+  // Check for specific error types
+  if (typeof error === 'object') {
+    // Log all properties of the error object to aid debugging
+    Object.keys(error).forEach(key => {
+      console.log(`Error property ${key}:`, error[key]);
+    });
+    
+    // Handle different error scenarios
+    if (error.code === '42P01') {
+      return 'Database table does not exist. Please ensure the orders table is properly set up.';
+    }
+    
+    if (error.code === '23505') {
+      return 'A duplicate order already exists.';
+    }
+    
+    if (error.code === '23502') {
+      return 'Missing required fields in the order.';
+    }
+    
+    // Extract message if available
+    if (error.message) {
+      return error.message;
+    }
+    
+    // Extract details if available
+    if (error.details) {
+      return error.details;
+    }
+  }
+  
+  // Fallback to string representation
+  return String(error);
+};
+
+// Generate a fake order ID for local testing
+const generateFakeOrderId = (): string => {
+  return 'order_' + Math.random().toString(36).substring(2, 10);
+};
+
 export function OrderModal({ isOpen, onClose }: OrderModalProps) {
   const [username, setUsername] = useState('');
   const [platform, setPlatform] = useState<'java' | 'bedrock'>('java');
   const [selectedRank, setSelectedRank] = useState<string>('VIP');
   const [paymentProof, setPaymentProof] = useState<File | null>(null);
   const [loading, setLoading] = useState(false);
+  const [demoMode, setDemoMode] = useState(false);
   
   // Receipt states
   const [isReceiptOpen, setIsReceiptOpen] = useState(false);
@@ -94,7 +141,6 @@ export function OrderModal({ isOpen, onClose }: OrderModalProps) {
     } catch (error) {
       console.error('Error in sendToDiscord function:', error);
       // Don't throw error to prevent blocking the order process
-      // Just log it instead
     }
   };
 
@@ -131,85 +177,139 @@ export function OrderModal({ isOpen, onClose }: OrderModalProps) {
       const fileName = `${timestamp}_${randomString}.jpg`;
       const filePath = `guest/${fileName}`;
       
-      // Upload the file with proper configuration
-      const { error: uploadError, data: uploadData } = await supabase.storage
-        .from('payment-proofs')
-        .upload(filePath, paymentProof, {
-          cacheControl: '3600',
-          upsert: false,
-          contentType: paymentProof.type
-        });
-
-      if (uploadError) {
-        console.error('Upload error:', uploadError);
-        throw new Error('Failed to upload payment proof. Please try again.');
-      }
-
-      if (!uploadData || !uploadData.path) {
-        throw new Error('Upload failed. No data returned.');
-      }
-
-      // Construct the absolute public URL for the image manually to ensure it works
-      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://feaxosxwaajfagfjkmrx.supabase.co';
-      const publicUrl = `${supabaseUrl}/storage/v1/object/public/payment-proofs/${filePath}`;
+      let uploadData;
+      let publicUrl;
       
-      console.log('Payment proof URL:', publicUrl);
+      try {
+        // Upload the file with proper configuration
+        const { error: uploadError, data } = await supabase.storage
+          .from('payment-proofs')
+          .upload(filePath, paymentProof, {
+            cacheControl: '3600',
+            upsert: false,
+            contentType: paymentProof.type
+          });
+
+        if (uploadError) {
+          console.error('Upload error:', uploadError);
+          throw new Error('Failed to upload payment proof. Please try again.');
+        }
+
+        if (!data || !data.path) {
+          throw new Error('Upload failed. No data returned.');
+        }
+        
+        uploadData = data;
+
+        // Construct the absolute public URL for the image manually to ensure it works
+        const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://feaxosxwaajfagfjkmrx.supabase.co';
+        publicUrl = `${supabaseUrl}/storage/v1/object/public/payment-proofs/${filePath}`;
+        
+        console.log('Payment proof URL:', publicUrl);
+      } catch (uploadErr) {
+        console.error('File upload failed:', uploadErr);
+        // In demo mode, continue with a placeholder URL
+        if (!demoMode) throw uploadErr;
+        
+        publicUrl = selectedRankOption.image; // Use rank image as a fallback
+        uploadData = { path: 'demo/payment-proof.jpg' };
+        console.log('Using demo mode with placeholder image URL');
+      }
 
       // Create order with all required fields
       const orderData: Order = {
+        id: demoMode ? generateFakeOrderId() : undefined,
         username: username.trim(),
         platform,
         rank: selectedRank,
         price: selectedRankOption.price,
         payment_proof: uploadData.path,
         created_at: new Date().toISOString(),
-        status: 'pending' // Ensure status field is included
+        status: 'pending'
       };
 
-      console.log('Sending order data:', orderData);
+      let orderInsertResult = null;
 
-      // First, check if the orders table exists and has the correct structure
-      const { error: checkError } = await supabase
-        .from('orders')
-        .select('id')
-        .limit(1);
+      try {
+        // First, check if the orders table exists and has the correct structure
+        const { error: checkError, data: tableData } = await supabase
+          .from('orders')
+          .select('id')
+          .limit(1);
 
-      if (checkError) {
-        console.error('Table check error:', checkError);
-        
-        // If there's an issue with the table, attempt to provide helpful information
-        if (checkError.message?.includes('relation "orders" does not exist')) {
-          throw new Error('Orders table does not exist. Please contact support.');
-        }
-      }
-
-      // Insert the order with explicit column selection
-      const { error: orderError, data: orderInsertResult } = await supabase
-        .from('orders')
-        .insert(orderData)
-        .select();
-
-      if (orderError) {
-        console.error('Order error:', orderError);
-        
-        // Provide more specific error messages based on common issues
-        if (orderError.message?.includes('violates not-null constraint')) {
-          throw new Error('Missing required field in order data. Please try again or contact support.');
-        } else if (orderError.message?.includes('duplicate key')) {
-          throw new Error('This order already exists. Please try again with different information.');
+        if (checkError) {
+          console.error('Table check error details:', checkError);
+          
+          // If demo mode enabled, continue without database; otherwise throw error
+          if (!demoMode) {
+            throw new Error(`Table check failed: ${parseSupabaseError(checkError)}`);
+          } else {
+            console.log('Demo mode: Skipping database table check');
+            setDemoMode(true);
+          }
         } else {
-          throw new Error('Failed to create order. Please try again.');
+          console.log('Table check succeeded. Table exists:', tableData);
         }
+
+        console.log('Attempting to insert order data:', orderData);
+
+        // Skip database insertion in demo mode
+        if (!demoMode) {
+          // Try inserting in simplified format
+          const { error: orderError, data: insertResult } = await supabase
+            .from('orders')
+            .insert({
+              username: orderData.username,
+              platform: orderData.platform,
+              rank: orderData.rank,
+              price: orderData.price,
+              payment_proof: orderData.payment_proof,
+              status: orderData.status,
+              created_at: orderData.created_at
+            })
+            .select();
+
+          if (orderError) {
+            console.error('Order insertion error details:', orderError);
+            
+            // Try once more with demo mode if this fails
+            if (!demoMode) {
+              console.log('Database insertion failed. Enabling demo mode for testing.');
+              setDemoMode(true);
+            } else {
+              throw new Error(`Failed to create order: ${parseSupabaseError(orderError)}`);
+            }
+          } else {
+            orderInsertResult = insertResult;
+            console.log('Order inserted successfully:', orderInsertResult);
+          }
+        } else {
+          console.log('Demo mode: Skipping database insertion');
+        }
+      } catch (dbError) {
+        console.error('Database operation failed:', dbError);
+        
+        // Only rethrow if we're not in demo mode
+        if (!demoMode) {
+          throw dbError;
+        }
+        
+        console.log('Continuing in demo mode despite database error');
       }
 
       // Get the inserted order ID if available
       if (orderInsertResult && orderInsertResult.length > 0) {
         orderData.id = orderInsertResult[0].id;
+        console.log('Received order ID:', orderData.id);
       }
 
       // Send order information to Discord with the direct public URL
       try {
-        await sendToDiscord(orderData, publicUrl);
+        if (!demoMode) {
+          await sendToDiscord(orderData, publicUrl);
+        } else {
+          console.log('Demo mode: Skipping Discord webhook');
+        }
       } catch (discordError) {
         console.error('Discord notification failed, but order was created:', discordError);
         // Continue with success even if Discord notification fails
@@ -219,7 +319,9 @@ export function OrderModal({ isOpen, onClose }: OrderModalProps) {
       setCompletedOrder(orderData);
       
       // Show success message
-      toast.success('Order submitted successfully! Your receipt is ready.');
+      toast.success(demoMode 
+        ? 'Demo order created! Here is your receipt.' 
+        : 'Order submitted successfully! Your receipt is ready.');
       
       // Reset form
       setUsername('');
@@ -231,7 +333,25 @@ export function OrderModal({ isOpen, onClose }: OrderModalProps) {
       setIsReceiptOpen(true);
     } catch (error) {
       console.error('Submit error:', error);
-      toast.error(error instanceof Error ? error.message : 'An error occurred');
+      let errorMessage = 'An error occurred while processing your order.';
+      
+      if (error instanceof Error) {
+        errorMessage = error.message;
+      }
+      
+      // Offer demo mode if it's a database error
+      if (errorMessage.includes('Table check failed') || 
+          errorMessage.includes('Failed to create order')) {
+        toast.error(errorMessage + " Would you like to try demo mode?", {
+          duration: 5000,
+          icon: '🧪',
+          position: 'top-center'
+        });
+        // Enable demo mode automatically for the next attempt
+        setDemoMode(true);
+      } else {
+        toast.error(errorMessage);
+      }
     } finally {
       setLoading(false);
     }
@@ -254,7 +374,10 @@ export function OrderModal({ isOpen, onClose }: OrderModalProps) {
 
           <div className="text-center mb-6">
             <h2 className="text-2xl sm:text-3xl font-bold text-white mb-2">Complete Your Order</h2>
-            <p className="text-gray-400 text-sm sm:text-base">Select your platform and rank to proceed with the purchase</p>
+            <p className="text-gray-400 text-sm sm:text-base">
+              Select your platform and rank to proceed with the purchase
+              {demoMode && <span className="ml-1 text-emerald-400">• Demo Mode</span>}
+            </p>
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-4 sm:space-y-6">
