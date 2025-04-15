@@ -36,7 +36,7 @@ function Store() {
         <header className="p-4 sm:p-6 flex justify-between items-center border-b border-white/10">
           <div className="flex items-center gap-3">
             <img 
-              src="https://i.imgur.com/dIODmz4.jpeg" 
+              src="/favicon/favicon-32x32.png" 
               alt="Champa Logo" 
               className="w-8 h-8 sm:w-10 sm:h-10 rounded-full border-2 border-emerald-500"
             />
