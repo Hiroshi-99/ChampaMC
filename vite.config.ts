@@ -6,7 +6,7 @@ export default defineConfig({
   plugins: [react()],
   build: {
     // Enable minification for production builds
-    minify: 'terser',
+    minify: true,
     terserOptions: {
       compress: {
         drop_console: true, // Remove console.log in production

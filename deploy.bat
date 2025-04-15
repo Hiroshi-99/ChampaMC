@@ -16,6 +16,7 @@ if not exist .env.production (
 REM Install dependencies
 echo Installing dependencies...
 call npm install
+call npm install --save-dev terser
 
 REM Run build
 echo Building for production...

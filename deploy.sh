@@ -21,6 +21,7 @@ fi
 # Install dependencies
 echo -e "${YELLOW}Installing dependencies...${NC}"
 npm install
+npm install --save-dev terser
 
 # Run build
 echo -e "${YELLOW}Building for production...${NC}"
