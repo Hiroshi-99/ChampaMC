@@ -6,7 +6,7 @@ function Store() {
   const [isOrderModalOpen, setIsOrderModalOpen] = useState(false);
   
   // Single banner GIF instead of multiple slide images
-  const bannerGif = "https://i.imgur.com/JVwqZGE.gif";
+  const bannerGif = "/images/banner.gif";
 
   return (
     <div className="min-h-screen relative">
