@@ -1,4 +1,4 @@
-import React, { useRef } from 'react';
+import React, { useRef, useCallback, useMemo } from 'react';
 import { Download, X, Check, Info, User, Calendar, CreditCard } from 'lucide-react';
 import { Order, RankOption } from '../types';
 
@@ -12,9 +12,9 @@ interface ReceiptProps {
 export function Receipt({ isOpen, onClose, order, rankDetails }: ReceiptProps) {
   const receiptRef = useRef<HTMLDivElement>(null);
 
-  // Format date for receipt
-  const formatDate = (dateString: string) => {
-    const date = new Date(dateString);
+  // Format date for receipt - memoize to avoid recalculation
+  const formattedDate = useMemo(() => {
+    const date = new Date(order.created_at);
     return new Intl.DateTimeFormat('en-US', {
       year: 'numeric',
       month: 'long',
@@ -22,22 +22,32 @@ export function Receipt({ isOpen, onClose, order, rankDetails }: ReceiptProps) {
       hour: '2-digit',
       minute: '2-digit'
     }).format(date);
-  };
+  }, [order.created_at]);
 
-  // Generate order number from timestamp
-  const orderNumber = order.id || `ORDER-${new Date(order.created_at).getTime().toString().slice(-8)}`;
+  // Generate order number from timestamp - memoize to avoid recalculation
+  const orderNumber = useMemo(() => 
+    order.id || `ORDER-${new Date(order.created_at).getTime().toString().slice(-8)}`,
+    [order.id, order.created_at]
+  );
 
   // Handle printing the receipt
-  const handlePrint = () => {
-    // Fallback method if react-to-print is not available
+  const handlePrint = useCallback(() => {
+    // Use window.print for printing
     window.print();
-  };
+  }, []);
 
+  // Handle download as PDF
+  const handleDownload = useCallback(() => {
+    window.print();
+  }, []);
+
+  // Early return if not open
   if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-2 sm:p-4 overflow-hidden">
       <div className="bg-gray-800/95 rounded-2xl p-4 sm:p-6 md:p-8 w-full max-w-2xl m-2 sm:m-4 relative max-h-[90vh] overflow-y-auto">
+        {/* Close button */}
         <button
           onClick={onClose}
           className="absolute right-3 top-3 sm:right-4 sm:top-4 text-gray-400 hover:text-white transition-colors no-print"
@@ -46,9 +56,10 @@ export function Receipt({ isOpen, onClose, order, rankDetails }: ReceiptProps) {
           <X size={24} />
         </button>
 
+        {/* Success message (only visible on screen, not in print) */}
         <div className="text-center mb-6 no-print">
           <div className="inline-block bg-emerald-500 text-white rounded-full p-2 mb-3">
-            <Check size={32} />
+            <Check size={32} aria-hidden="true" />
           </div>
           <h2 className="text-2xl sm:text-3xl font-bold text-white mb-2">Order Confirmed!</h2>
           <p className="text-gray-400 text-sm sm:text-base">
@@ -59,7 +70,7 @@ export function Receipt({ isOpen, onClose, order, rankDetails }: ReceiptProps) {
         {/* Printable Receipt */}
         <div 
           ref={receiptRef}
-          className="bg-white rounded-xl overflow-hidden text-gray-800 receipt-content"
+          className="bg-white rounded-xl overflow-hidden text-gray-800 receipt-content shadow-lg"
         >
           {/* Receipt Header */}
           <div className="bg-emerald-500 p-4 text-white">
@@ -69,12 +80,13 @@ export function Receipt({ isOpen, onClose, order, rankDetails }: ReceiptProps) {
                   src="/favicon/favicon-32x32.png" 
                   alt="Champa Logo" 
                   className="w-8 h-8"
+                  loading="lazy"
                 />
                 <h3 className="text-xl font-bold">Champa Store</h3>
               </div>
               <div className="text-sm">
                 <div>Receipt #{orderNumber}</div>
-                <div>{formatDate(order.created_at)}</div>
+                <div>{formattedDate}</div>
               </div>
             </div>
           </div>
@@ -84,12 +96,12 @@ export function Receipt({ isOpen, onClose, order, rankDetails }: ReceiptProps) {
             {/* Order Details */}
             <div className="border-b pb-4">
               <h4 className="font-semibold text-lg mb-2 flex items-center gap-2">
-                <Info size={18} className="text-emerald-600" />
+                <Info size={18} className="text-emerald-600" aria-hidden="true" />
                 Order Details
               </h4>
               <div className="grid grid-cols-2 gap-2 text-sm">
                 <div className="flex items-center gap-2">
-                  <User size={14} className="text-emerald-600" />
+                  <User size={14} className="text-emerald-600" aria-hidden="true" />
                   <span className="font-medium">Username:</span>
                 </div>
                 <div>{order.username}</div>
@@ -105,17 +117,17 @@ export function Receipt({ isOpen, onClose, order, rankDetails }: ReceiptProps) {
                 <div>{order.rank}</div>
                 
                 <div className="flex items-center gap-2">
-                  <Calendar size={14} className="text-emerald-600" />
+                  <Calendar size={14} className="text-emerald-600" aria-hidden="true" />
                   <span className="font-medium">Date:</span>
                 </div>
-                <div>{formatDate(order.created_at)}</div>
+                <div>{formattedDate}</div>
               </div>
             </div>
 
             {/* Payment Summary */}
             <div>
               <h4 className="font-semibold text-lg mb-2 flex items-center gap-2">
-                <CreditCard size={18} className="text-emerald-600" />
+                <CreditCard size={18} className="text-emerald-600" aria-hidden="true" />
                 Payment Summary
               </h4>
               <div className="bg-gray-50 p-3 rounded-lg">
@@ -137,6 +149,7 @@ export function Receipt({ isOpen, onClose, order, rankDetails }: ReceiptProps) {
                   src={rankDetails.image} 
                   alt={`${order.rank} Rank`}
                   className="w-full h-full object-contain"
+                  loading="lazy"
                 />
               </div>
             </div>
@@ -165,8 +178,9 @@ export function Receipt({ isOpen, onClose, order, rankDetails }: ReceiptProps) {
           <button
             onClick={handlePrint}
             className="flex-1 bg-white hover:bg-gray-100 text-gray-800 rounded-lg py-2.5 px-4 flex items-center justify-center gap-2 transition-colors text-sm sm:text-base"
+            aria-label="Print receipt"
           >
-            <Download size={18} />
+            <Download size={18} aria-hidden="true" />
             Print Receipt
           </button>
           <button

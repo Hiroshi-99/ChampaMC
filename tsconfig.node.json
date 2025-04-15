@@ -11,6 +11,9 @@
     "isolatedModules": true,
     "moduleDetection": "force",
     "composite": true,
+    "emitDeclarationOnly": true,
+    "declaration": true,
+    "outDir": "dist",
 
     /* Linting */
     "strict": true,

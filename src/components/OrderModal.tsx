@@ -1,8 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo, useCallback } from 'react';
 import { X, Upload, Info, CreditCard, User, Shield } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import toast from 'react-hot-toast';
-import { RankOption, Order, DiscordWebhookContent } from '../types';
+import { RankOption, Order } from '../types';
 import { WebhookService } from '../services/webhookService';
 import { Receipt } from './Receipt';
 
@@ -11,6 +11,7 @@ interface OrderModalProps {
   onClose: () => void;
 }
 
+// Move RANKS outside component to avoid recreating on each render
 const RANKS: RankOption[] = [
   { 
     name: 'VIP', 
@@ -102,7 +103,14 @@ const generateFakeOrderId = (): string => {
   return 'order_' + Math.random().toString(36).substring(2, 10);
 };
 
+// Username validation regex - compile once outside component
+const usernameRegex = /^[a-zA-Z0-9_]{3,16}$/;
+
+// Max file size constant (5MB)
+const MAX_FILE_SIZE = 5 * 1024 * 1024;
+
 export function OrderModal({ isOpen, onClose }: OrderModalProps) {
+  // State variables
   const [username, setUsername] = useState('');
   const [platform, setPlatform] = useState<'java' | 'bedrock'>('java');
   const [selectedRank, setSelectedRank] = useState<string>('VIP');
@@ -114,25 +122,48 @@ export function OrderModal({ isOpen, onClose }: OrderModalProps) {
   const [isReceiptOpen, setIsReceiptOpen] = useState(false);
   const [completedOrder, setCompletedOrder] = useState<Order | null>(null);
 
-  const handleReceiptClose = () => {
+  // Memoize selected rank to avoid recalculation on each render
+  const selectedRankOption = useMemo(() => 
+    RANKS.find(rank => rank.name === selectedRank), 
+    [selectedRank]
+  );
+  
+  // Memoize price to avoid recalculation
+  const selectedRankPrice = useMemo(() => 
+    selectedRankOption?.price || 0,
+    [selectedRankOption]
+  );
+
+  // Callbacks for event handlers
+  const handleReceiptClose = useCallback(() => {
     setIsReceiptOpen(false);
     onClose();
-  };
+  }, [onClose]);
 
-  if (!isOpen) return null;
-
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
       setPaymentProof(e.target.files[0]);
     }
-  };
+  }, []);
 
+  const handlePlatformChange = useCallback((newPlatform: 'java' | 'bedrock') => {
+    setPlatform(newPlatform);
+  }, []);
+
+  const handleRankSelect = useCallback((rankName: string) => {
+    setSelectedRank(rankName);
+  }, []);
+
+  // Early return if modal is not open
+  if (!isOpen) return null;
+
+  // Send order data to Discord webhook
   const sendToDiscord = async (orderData: Order, paymentProofUrl: string) => {
     try {
       // Create webhook content using the service
       const webhookContent = WebhookService.createOrderNotification(orderData, paymentProofUrl);
       
-      // Send the notification
+      // Send the notification with a timeout to prevent hanging
       const success = await WebhookService.sendDiscordNotification(webhookContent);
       
       if (!success) {
@@ -149,16 +180,15 @@ export function OrderModal({ isOpen, onClose }: OrderModalProps) {
     setLoading(true);
 
     try {
+      // Validate user inputs
       if (!paymentProof) throw new Error('Please upload payment proof');
       if (!username.trim()) throw new Error('Please enter your username');
 
-      // Validate username (alphanumeric and underscore only, 3-16 characters)
-      const usernameRegex = /^[a-zA-Z0-9_]{3,16}$/;
+      // Validate username format
       if (!usernameRegex.test(username.trim())) {
         throw new Error('Username must be 3-16 characters long and contain only letters, numbers, and underscores');
       }
 
-      const selectedRankOption = RANKS.find(rank => rank.name === selectedRank);
       if (!selectedRankOption) throw new Error('Please select a valid rank');
 
       // Validate file type
@@ -166,13 +196,13 @@ export function OrderModal({ isOpen, onClose }: OrderModalProps) {
         throw new Error('Please upload a valid image file');
       }
 
-      // Validate file size (max 5MB)
-      if (paymentProof.size > 5 * 1024 * 1024) {
+      // Validate file size
+      if (paymentProof.size > MAX_FILE_SIZE) {
         throw new Error('Image size should be less than 5MB');
       }
 
-      // Create the file path with proper formatting for Supabase
-      const timestamp = new Date().getTime();
+      // Generate secure file path with timestamp and randomness
+      const timestamp = Date.now();
       const randomString = Math.random().toString(36).substring(2, 10);
       const fileName = `${timestamp}_${randomString}.jpg`;
       const filePath = `guest/${fileName}`;
@@ -181,7 +211,7 @@ export function OrderModal({ isOpen, onClose }: OrderModalProps) {
       let publicUrl;
       
       try {
-        // Upload the file with proper configuration
+        // Upload file to Supabase storage
         const { error: uploadError, data } = await supabase.storage
           .from('payment-proofs')
           .upload(filePath, paymentProof, {
@@ -201,11 +231,9 @@ export function OrderModal({ isOpen, onClose }: OrderModalProps) {
         
         uploadData = data;
 
-        // Construct the absolute public URL for the image manually to ensure it works
+        // Construct the public URL
         const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://feaxosxwaajfagfjkmrx.supabase.co';
         publicUrl = `${supabaseUrl}/storage/v1/object/public/payment-proofs/${filePath}`;
-        
-        console.log('Payment proof URL:', publicUrl);
       } catch (uploadErr) {
         console.error('File upload failed:', uploadErr);
         // In demo mode, continue with a placeholder URL
@@ -216,7 +244,7 @@ export function OrderModal({ isOpen, onClose }: OrderModalProps) {
         console.log('Using demo mode with placeholder image URL');
       }
 
-      // Create order with all required fields
+      // Create order with required fields
       const orderData: Order = {
         id: demoMode ? generateFakeOrderId() : undefined,
         username: username.trim(),
@@ -231,7 +259,7 @@ export function OrderModal({ isOpen, onClose }: OrderModalProps) {
       let orderInsertResult = null;
 
       try {
-        // First, check if the orders table exists and has the correct structure
+        // First, check if the orders table exists
         const { error: checkError, data: tableData } = await supabase
           .from('orders')
           .select('id')
@@ -247,15 +275,11 @@ export function OrderModal({ isOpen, onClose }: OrderModalProps) {
             console.log('Demo mode: Skipping database table check');
             setDemoMode(true);
           }
-        } else {
-          console.log('Table check succeeded. Table exists:', tableData);
         }
-
-        console.log('Attempting to insert order data:', orderData);
 
         // Skip database insertion in demo mode
         if (!demoMode) {
-          // Try inserting in simplified format
+          // Insert order into database
           const { error: orderError, data: insertResult } = await supabase
             .from('orders')
             .insert({
@@ -281,10 +305,7 @@ export function OrderModal({ isOpen, onClose }: OrderModalProps) {
             }
           } else {
             orderInsertResult = insertResult;
-            console.log('Order inserted successfully:', orderInsertResult);
           }
-        } else {
-          console.log('Demo mode: Skipping database insertion');
         }
       } catch (dbError) {
         console.error('Database operation failed:', dbError);
@@ -293,22 +314,17 @@ export function OrderModal({ isOpen, onClose }: OrderModalProps) {
         if (!demoMode) {
           throw dbError;
         }
-        
-        console.log('Continuing in demo mode despite database error');
       }
 
       // Get the inserted order ID if available
       if (orderInsertResult && orderInsertResult.length > 0) {
         orderData.id = orderInsertResult[0].id;
-        console.log('Received order ID:', orderData.id);
       }
 
-      // Send order information to Discord with the direct public URL
+      // Send Discord notification
       try {
         if (!demoMode) {
           await sendToDiscord(orderData, publicUrl);
-        } else {
-          console.log('Demo mode: Skipping Discord webhook');
         }
       } catch (discordError) {
         console.error('Discord notification failed, but order was created:', discordError);
@@ -357,13 +373,11 @@ export function OrderModal({ isOpen, onClose }: OrderModalProps) {
     }
   };
 
-  const selectedRankOption = RANKS.find(rank => rank.name === selectedRank);
-  const selectedRankPrice = selectedRankOption?.price || 0;
-
   return (
     <>
       <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-2 sm:p-4 overflow-hidden">
         <div className="bg-gray-800/95 rounded-2xl p-4 sm:p-6 md:p-8 w-full max-w-2xl m-2 sm:m-4 relative max-h-[90vh] overflow-y-auto">
+          {/* Close button */}
           <button
             onClick={onClose}
             className="absolute right-3 top-3 sm:right-4 sm:top-4 text-gray-400 hover:text-white transition-colors"
@@ -372,6 +386,7 @@ export function OrderModal({ isOpen, onClose }: OrderModalProps) {
             <X size={24} />
           </button>
 
+          {/* Header */}
           <div className="text-center mb-6">
             <h2 className="text-2xl sm:text-3xl font-bold text-white mb-2">Complete Your Order</h2>
             <p className="text-gray-400 text-sm sm:text-base">
@@ -380,7 +395,9 @@ export function OrderModal({ isOpen, onClose }: OrderModalProps) {
             </p>
           </div>
 
+          {/* Order form */}
           <form onSubmit={handleSubmit} className="space-y-4 sm:space-y-6">
+            {/* Order Summary */}
             <div className="bg-gray-700/50 rounded-lg p-3 sm:p-4 border border-gray-600">
               <h3 className="text-base sm:text-lg font-semibold text-white mb-3 sm:mb-4 flex items-center gap-2">
                 <Info size={18} className="text-emerald-400" />
@@ -402,6 +419,7 @@ export function OrderModal({ isOpen, onClose }: OrderModalProps) {
               </div>
             </div>
 
+            {/* Username Input */}
             <div>
               <label className="block text-sm font-medium text-gray-300 mb-1 flex items-center gap-2">
                 <User size={16} className="text-emerald-400" />
@@ -417,9 +435,11 @@ export function OrderModal({ isOpen, onClose }: OrderModalProps) {
                 pattern="[a-zA-Z0-9_]{3,16}"
                 title="Username must be 3-16 characters long and contain only letters, numbers, and underscores"
                 maxLength={16}
+                autoComplete="username"
               />
             </div>
 
+            {/* Platform Selection */}
             <div>
               <label className="block text-sm font-medium text-gray-300 mb-1">
                 Platform
@@ -427,7 +447,7 @@ export function OrderModal({ isOpen, onClose }: OrderModalProps) {
               <div className="flex gap-2">
                 <button
                   type="button"
-                  onClick={() => setPlatform('java')}
+                  onClick={() => handlePlatformChange('java')}
                   className={`flex-1 py-2 px-3 sm:px-4 rounded-lg border transition-colors text-sm sm:text-base ${
                     platform === 'java'
                       ? 'bg-emerald-500 text-white border-emerald-600'
@@ -438,7 +458,7 @@ export function OrderModal({ isOpen, onClose }: OrderModalProps) {
                 </button>
                 <button
                   type="button"
-                  onClick={() => setPlatform('bedrock')}
+                  onClick={() => handlePlatformChange('bedrock')}
                   className={`flex-1 py-2 px-3 sm:px-4 rounded-lg border transition-colors text-sm sm:text-base ${
                     platform === 'bedrock'
                       ? 'bg-emerald-500 text-white border-emerald-600'
@@ -450,6 +470,7 @@ export function OrderModal({ isOpen, onClose }: OrderModalProps) {
               </div>
             </div>
 
+            {/* Rank Selection */}
             <div>
               <label className="block text-sm font-medium text-gray-300 mb-1">
                 Select Rank
@@ -459,7 +480,7 @@ export function OrderModal({ isOpen, onClose }: OrderModalProps) {
                   <button
                     key={rank.name}
                     type="button"
-                    onClick={() => setSelectedRank(rank.name)}
+                    onClick={() => handleRankSelect(rank.name)}
                     className={`py-2 sm:py-3 px-2 sm:px-3 rounded-lg border transition-all transform hover:scale-[1.02] text-sm ${
                       selectedRank === rank.name
                         ? `bg-gradient-to-r ${rank.color} text-white border-transparent`
@@ -485,6 +506,7 @@ export function OrderModal({ isOpen, onClose }: OrderModalProps) {
                     src={selectedRankOption.image} 
                     alt={`${selectedRank} Kit Preview`}
                     className="w-auto h-auto max-w-full max-h-[250px] object-contain rounded-lg border border-gray-600"
+                    loading="lazy"
                   />
                 </div>
               </div>
@@ -503,12 +525,14 @@ export function OrderModal({ isOpen, onClose }: OrderModalProps) {
                     src="https://i.imgur.com/xmzqO4S.jpeg" 
                     alt="Payment QR Code"
                     className="w-36 h-36 sm:w-48 sm:h-48 mx-auto"
+                    loading="lazy"
                   />
                 </div>
                 <p className="text-xs sm:text-sm text-gray-400 mt-2">Amount: ${selectedRankPrice}</p>
               </div>
             </div>
 
+            {/* File Upload */}
             <div>
               <label className="block text-sm font-medium text-gray-300 mb-1">
                 Payment Proof (QR Code Screenshot)
@@ -536,10 +560,12 @@ export function OrderModal({ isOpen, onClose }: OrderModalProps) {
               </div>
             </div>
 
+            {/* Submit Button */}
             <button
               type="submit"
               disabled={loading}
               className="w-full bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-600 hover:to-emerald-700 text-white rounded-lg py-3 px-4 transition duration-300 disabled:opacity-50 transform hover:scale-[1.02] text-sm sm:text-base font-medium mt-2"
+              aria-busy={loading}
             >
               {loading ? 'Processing...' : 'Submit Order'}
             </button>

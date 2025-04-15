@@ -66,12 +66,58 @@ npm run build
 npm run preview
 ```
 
+## Deployment
+
+### Deploying to Netlify
+
+The easiest way to deploy Champa Store is using Netlify:
+
+1. **Create a Netlify account**
+   - Sign up at [netlify.com](https://www.netlify.com/)
+
+2. **Deploy from Git**
+   - Push your code to GitHub, GitLab or Bitbucket
+   - Connect your repository to Netlify
+   - Netlify will automatically detect it's a Vite project
+
+3. **Configure Environment Variables**
+   - Go to Site settings > Environment variables
+   - Add the following variables:
+     - `VITE_SUPABASE_URL`
+     - `VITE_SUPABASE_ANON_KEY`
+     - `VITE_DISCORD_WEBHOOK_URL`
+
+4. **Configure Build Settings**
+   - Build command: `npm run build`
+   - Publish directory: `dist`
+   - These should be automatically detected
+
+5. **Enable Continuous Deployment**
+   - Every push to your main branch will trigger a new deployment
+
+### Manual Deployment
+
+Alternatively, you can deploy manually:
+
+```bash
+# Install Netlify CLI
+npm install -g netlify-cli
+
+# Login to your Netlify account
+netlify login
+
+# Deploy production build
+npm run build
+netlify deploy --prod
+```
+
 ## Features
 
 - Minecraft rank store
 - Secure order processing
 - Discord webhook notifications
 - Supabase backend integration
+- Order receipts with printing capability
 - Responsive design
 
 ## Security Best Practices
