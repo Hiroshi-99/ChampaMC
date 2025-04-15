@@ -1,32 +1,12 @@
-import React, { useState, useEffect } from 'react';
-import { ShoppingCart, Check, ChevronLeft, ChevronRight } from 'lucide-react';
+import React, { useState } from 'react';
+import { ShoppingCart, Check } from 'lucide-react';
 import { OrderModal } from '../components/OrderModal';
 
 function Store() {
   const [isOrderModalOpen, setIsOrderModalOpen] = useState(false);
-  const [currentSlide, setCurrentSlide] = useState(0);
-
-  const bannerImages = [
-    "https://i.imgur.com/8WJ8noJ.jpeg",
-    "https://i.imgur.com/dIODmz4.jpeg",
-    "https://i.imgur.com/OQJmGoB.jpeg"
-  ];
-
-  useEffect(() => {
-    const timer = setInterval(() => {
-      setCurrentSlide((prev) => (prev + 1) % bannerImages.length);
-    }, 5000); // Change slide every 5 seconds
-
-    return () => clearInterval(timer);
-  }, []);
-
-  const nextSlide = () => {
-    setCurrentSlide((prev) => (prev + 1) % bannerImages.length);
-  };
-
-  const prevSlide = () => {
-    setCurrentSlide((prev) => (prev - 1 + bannerImages.length) % bannerImages.length);
-  };
+  
+  // Single banner GIF instead of multiple slide images
+  const bannerGif = "https://i.imgur.com/JVwqZGE.gif";
 
   return (
     <div className="min-h-screen relative">
@@ -64,74 +44,17 @@ function Store() {
           </div>
         </header>
 
-        {/* Banner */}
+        {/* Banner - Single GIF */}
         <div className="mx-auto w-full max-w-6xl px-3 sm:px-4 mt-3 sm:mt-4 mb-4 sm:mb-8">
           <div className="relative w-full overflow-hidden rounded-xl sm:rounded-2xl shadow-xl sm:shadow-2xl">
-            {/* Banner Images */}
-            <div 
-              className="relative w-full h-[200px] sm:h-[300px] md:h-[400px] transition-transform duration-500 ease-out"
-              style={{ transform: `translateX(-${currentSlide * 100}%)` }}
-            >
-              <div className="absolute inset-0 flex">
-                {bannerImages.map((image, index) => (
-                  <div
-                    key={index}
-                    className="relative w-full h-full flex-shrink-0"
-                    style={{ left: `${index * 100}%` }}
-                  >
-                    <img 
-                      src={image}
-                      alt={`Banner ${index + 1}`}
-                      className="w-full h-full object-cover"
-                    />
-                    <div className="absolute inset-0 bg-gradient-to-r from-black/50 to-transparent"></div>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {/* Navigation Buttons */}
-            <button 
-              onClick={prevSlide}
-              className="absolute left-2 sm:left-4 top-1/2 -translate-y-1/2 bg-black/50 hover:bg-black/70 text-white p-1 sm:p-2 rounded-full transition-colors"
-              aria-label="Previous slide"
-            >
-              <ChevronLeft size={20} className="sm:hidden" />
-              <ChevronLeft size={24} className="hidden sm:block" />
-            </button>
-            <button 
-              onClick={nextSlide}
-              className="absolute right-2 sm:right-4 top-1/2 -translate-y-1/2 bg-black/50 hover:bg-black/70 text-white p-1 sm:p-2 rounded-full transition-colors"
-              aria-label="Next slide"
-            >
-              <ChevronRight size={20} className="sm:hidden" />
-              <ChevronRight size={24} className="hidden sm:block" />
-            </button>
-
-            {/* Slide Indicators */}
-            <div className="absolute bottom-2 sm:bottom-4 left-1/2 -translate-x-1/2 flex gap-1 sm:gap-2">
-              {bannerImages.map((_, index) => (
-                <button
-                  key={index}
-                  onClick={() => setCurrentSlide(index)}
-                  className={`w-1.5 sm:w-2 h-1.5 sm:h-2 rounded-full transition-all ${
-                    currentSlide === index 
-                      ? 'bg-white sm:w-4 w-3' 
-                      : 'bg-white/50 hover:bg-white/75'
-                  }`}
-                  aria-label={`Go to slide ${index + 1}`}
-                />
-              ))}
-            </div>
-
-            {/* Banner Content */}
-            <div className="absolute inset-0 z-20 flex flex-col justify-center p-4 sm:p-8 md:p-16">
-              <h2 className="text-3xl sm:text-4xl md:text-6xl font-bold text-white drop-shadow-lg mb-2 sm:mb-4">
-                Champa <span className="text-emerald-400">Ranks</span>
-              </h2>
-              <p className="text-white/90 text-sm sm:text-lg md:text-xl max-w-md">
-                Enhance your gameplay experience with our premium ranks
-              </p>
+            {/* Single Banner GIF */}
+            <div className="relative w-full h-[200px] sm:h-[300px] md:h-[400px]">
+              <img 
+                src={bannerGif}
+                alt="Champa Store Banner"
+                className="w-full h-full object-cover"
+              />
+              <div className="absolute inset-0 bg-gradient-to-r from-black/30 to-transparent"></div>
             </div>
           </div>
         </div>
