@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useCallback } from 'react';
 import { X, Upload, Info, CreditCard, User, Shield } from 'lucide-react';
-import { supabase } from '../lib/supabase';
+import { supabase, getPublicStorageUrl } from '../lib/supabase';
 import toast from 'react-hot-toast';
 import { RankOption, Order } from '../types';
 import { WebhookService } from '../services/webhookService';
@@ -232,8 +232,7 @@ export function OrderModal({ isOpen, onClose }: OrderModalProps) {
         uploadData = data;
 
         // Construct the public URL
-        const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://feaxosxwaajfagfjkmrx.supabase.co';
-        publicUrl = `${supabaseUrl}/storage/v1/object/public/payment-proofs/${filePath}`;
+        publicUrl = getPublicStorageUrl('payment-proofs', filePath);
       } catch (uploadErr) {
         console.error('File upload failed:', uploadErr);
         // In demo mode, continue with a placeholder URL

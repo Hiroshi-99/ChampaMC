@@ -13,6 +13,9 @@ if (!supabaseAnonKey || typeof supabaseAnonKey !== 'string') {
   throw new Error('Missing or invalid VITE_SUPABASE_ANON_KEY environment variable');
 }
 
+// Log Supabase URL for debugging (will be removed in production by terser)
+console.log('Connecting to Supabase URL:', supabaseUrl);
+
 // Create and export the Supabase client with performance options
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   auth: {
@@ -27,6 +30,9 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
     timeout: 8000,
   },
 });
+
+// Extract base domain for storage URLs - used for proper storage URL construction
+export const supabaseBaseDomain = new URL(supabaseUrl).hostname;
 
 // Custom fetch implementation with timeout
 function customFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
@@ -54,6 +60,11 @@ function customFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Resp
       .finally(() => clearTimeout(timeout));
   });
 }
+
+// Utility function to get public URL for storage items
+export const getPublicStorageUrl = (bucket: string, path: string): string => {
+  return `${supabaseUrl}/storage/v1/object/public/${bucket}/${path}`;
+};
 
 // Export connection status checker for app health monitoring
 export const checkSupabaseConnection = async (): Promise<boolean> => {

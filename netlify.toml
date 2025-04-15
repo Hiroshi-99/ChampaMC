@@ -34,7 +34,7 @@
     X-XSS-Protection = "1; mode=block"
     Referrer-Policy = "strict-origin-when-cross-origin"
     Permissions-Policy = "camera=(), microphone=(), geolocation=()"
-    Content-Security-Policy = "default-src 'self'; img-src 'self' https://i.imgur.com data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' https://feaxosxwaajfagfjkmrx.supabase.co https://discord.com; font-src 'self'; frame-ancestors 'none';"
+    Content-Security-Policy = "default-src 'self'; img-src 'self' https://i.imgur.com data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' https://*.supabase.co https://discord.com; font-src 'self'; frame-ancestors 'none';"
 
 # Optimize post-processing
 [build.processing]
