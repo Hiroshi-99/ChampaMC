@@ -2,17 +2,12 @@ import React, { useState } from 'react';
 import { X, Upload, Info, CreditCard, User, Shield } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import toast from 'react-hot-toast';
+import { RankOption, Order, DiscordWebhookContent } from '../types';
+import { WebhookService } from '../services/webhookService';
 
 interface OrderModalProps {
   isOpen: boolean;
   onClose: () => void;
-}
-
-interface RankOption {
-  name: string;
-  price: number;
-  color: string;
-  image: string;
 }
 
 const RANKS: RankOption[] = [
@@ -60,8 +55,6 @@ const RANKS: RankOption[] = [
   }
 ];
 
-const DISCORD_WEBHOOK_URL = 'https://discord.com/api/webhooks/1326842035621068820/Os7gvio_nXdd6bM-mJ3eCxnoBVwlc7wvkCPpqFZITQMW3swCcTfZVFE45cmX1Aex4KVe'; // Replace with your Discord webhook URL
-
 export function OrderModal({ isOpen, onClose }: OrderModalProps) {
   const [username, setUsername] = useState('');
   const [platform, setPlatform] = useState<'java' | 'bedrock'>('java');
@@ -77,103 +70,19 @@ export function OrderModal({ isOpen, onClose }: OrderModalProps) {
     }
   };
 
-  const sendToDiscord = async (orderData: any, paymentProofUrl: string) => {
+  const sendToDiscord = async (orderData: Order, paymentProofUrl: string) => {
     try {
-      // Create a more detailed and attractive Discord webhook message
-      const embedColor = (() => {
-        // Match color to rank
-        const rankOption = RANKS.find(r => r.name === orderData.rank);
-        // Default to green if no match found
-        return rankOption ? 0x00aa00 : 0x00aa00;
-      })();
+      // Create webhook content using the service
+      const webhookContent = WebhookService.createOrderNotification(orderData, paymentProofUrl);
       
-      // Format timestamp for better readability
-      const formattedDate = new Date().toLocaleString('en-US', {
-        weekday: 'long',
-        year: 'numeric',
-        month: 'long',
-        day: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit'
-      });
-
-      const webhookContent = {
-        username: "Champa Store Bot",
-        avatar_url: "https://i.imgur.com/R66g1Pe.jpg", // You can replace this with your logo URL
-        content: "🎮 **NEW RANK ORDER!** 🎮",
-        embeds: [
-          {
-            title: `New ${orderData.rank} Rank Order`,
-            color: embedColor,
-            description: `A new order has been received and is awaiting processing.`,
-            fields: [
-              {
-                name: "👤 Customer",
-                value: `\`${orderData.username}\``,
-                inline: true
-              },
-              {
-                name: "🎮 Platform",
-                value: `\`${orderData.platform.toUpperCase()}\``,
-                inline: true
-              },
-              {
-                name: "⭐ Rank",
-                value: `\`${orderData.rank}\``,
-                inline: true
-              },
-              {
-                name: "💰 Price",
-                value: `\`$${orderData.price}\``,
-                inline: true
-              },
-              {
-                name: "⏰ Time",
-                value: `\`${formattedDate}\``,
-                inline: true
-              }
-            ],
-            thumbnail: {
-              url: "https://i.imgur.com/R66g1Pe.jpg"  // You can replace this with your logo URL
-            },
-            footer: {
-              text: "Champa Store Order System",
-              icon_url: "https://i.imgur.com/R66g1Pe.jpg"  // You can replace this with your logo URL
-            },
-            timestamp: new Date().toISOString()
-          }
-        ]
-      };
-
-      // Add the payment proof image as a separate embed to ensure it displays properly
-      if (paymentProofUrl) {
-        webhookContent.embeds.push({
-          title: "💳 Payment Proof",
-          color: embedColor,
-          image: {
-            url: paymentProofUrl
-          }
-        });
+      // Send the notification
+      const success = await WebhookService.sendDiscordNotification(webhookContent);
+      
+      if (!success) {
+        console.warn('Discord notification could not be sent, but order process will continue');
       }
-      
-      // Make the request to Discord webhook
-      const response = await fetch(DISCORD_WEBHOOK_URL, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(webhookContent),
-      });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error('Discord webhook error:', errorText);
-        throw new Error(`Failed to send Discord notification: ${response.status} ${response.statusText}`);
-      }
-      
-      console.log('Discord webhook sent successfully');
     } catch (error) {
-      console.error('Error sending Discord notification:', error);
+      console.error('Error in sendToDiscord function:', error);
       // Don't throw error to prevent blocking the order process
       // Just log it instead
     }
@@ -186,6 +95,12 @@ export function OrderModal({ isOpen, onClose }: OrderModalProps) {
     try {
       if (!paymentProof) throw new Error('Please upload payment proof');
       if (!username.trim()) throw new Error('Please enter your username');
+
+      // Validate username (alphanumeric and underscore only, 3-16 characters)
+      const usernameRegex = /^[a-zA-Z0-9_]{3,16}$/;
+      if (!usernameRegex.test(username.trim())) {
+        throw new Error('Username must be 3-16 characters long and contain only letters, numbers, and underscores');
+      }
 
       const selectedRankOption = RANKS.find(rank => rank.name === selectedRank);
       if (!selectedRankOption) throw new Error('Please select a valid rank');
@@ -209,10 +124,10 @@ export function OrderModal({ isOpen, onClose }: OrderModalProps) {
       // Upload the file with proper configuration
       const { error: uploadError, data: uploadData } = await supabase.storage
         .from('payment-proofs')
-        .upload(filePath, paymentProof!, {
+        .upload(filePath, paymentProof, {
           cacheControl: '3600',
           upsert: false,
-          contentType: paymentProof!.type
+          contentType: paymentProof.type
         });
 
       if (uploadError) {
@@ -225,13 +140,13 @@ export function OrderModal({ isOpen, onClose }: OrderModalProps) {
       }
 
       // Construct the absolute public URL for the image manually to ensure it works
-      const supabaseUrl = 'https://feaxosxwaajfagfjkmrx.supabase.co';
+      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://feaxosxwaajfagfjkmrx.supabase.co';
       const publicUrl = `${supabaseUrl}/storage/v1/object/public/payment-proofs/${filePath}`;
       
       console.log('Payment proof URL:', publicUrl);
 
       // Create order with all required fields
-      const orderData = {
+      const orderData: Order = {
         username: username.trim(),
         platform,
         rank: selectedRank,
@@ -253,7 +168,7 @@ export function OrderModal({ isOpen, onClose }: OrderModalProps) {
         console.error('Table check error:', checkError);
         
         // If there's an issue with the table, attempt to provide helpful information
-        if (checkError.message.includes('relation "orders" does not exist')) {
+        if (checkError.message?.includes('relation "orders" does not exist')) {
           throw new Error('Orders table does not exist. Please contact support.');
         }
       }
@@ -267,9 +182,9 @@ export function OrderModal({ isOpen, onClose }: OrderModalProps) {
         console.error('Order error:', orderError);
         
         // Provide more specific error messages based on common issues
-        if (orderError.message && orderError.message.includes('violates not-null constraint')) {
+        if (orderError.message?.includes('violates not-null constraint')) {
           throw new Error('Missing required field in order data. Please try again or contact support.');
-        } else if (orderError.message && orderError.message.includes('duplicate key')) {
+        } else if (orderError.message?.includes('duplicate key')) {
           throw new Error('This order already exists. Please try again with different information.');
         } else {
           throw new Error('Failed to create order. Please try again.');
@@ -351,6 +266,9 @@ export function OrderModal({ isOpen, onClose }: OrderModalProps) {
               className="w-full bg-gray-700/50 border border-gray-600 rounded-lg py-2 px-3 text-white focus:outline-none focus:ring-2 focus:ring-emerald-400 text-sm sm:text-base"
               required
               placeholder="Enter your Minecraft username"
+              pattern="[a-zA-Z0-9_]{3,16}"
+              title="Username must be 3-16 characters long and contain only letters, numbers, and underscores"
+              maxLength={16}
             />
           </div>
 
