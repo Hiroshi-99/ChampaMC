@@ -22,6 +22,9 @@ export interface RankOption {
   created_at?: string;
   updated_at?: string;
   discount?: number;
+  discount_expires_at?: string | null;
+  is_discount_active?: boolean;
+  discount_days_remaining?: number | null;
 }
 
 // Discord webhook types

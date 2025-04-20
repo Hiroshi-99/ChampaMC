@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useCallback, useEffect } from 'react';
-import { X, Upload, Info, CreditCard, User, Shield, Tag, PercentIcon } from 'lucide-react';
+import { X, Upload, Info, CreditCard, User, Shield, Tag, PercentIcon, Clock } from 'lucide-react';
 import { supabase, getPublicStorageUrl } from '../lib/supabase';
 import toast from 'react-hot-toast';
 import { RankOption, Order } from '../types';
@@ -63,6 +63,35 @@ const usernameRegex = /^[a-zA-Z0-9_]{3,16}$/;
 // Max file size constant (5MB)
 const MAX_FILE_SIZE = 5 * 1024 * 1024;
 
+// Add a function to format date for display
+const formatDate = (dateString: string | null | undefined): string => {
+  if (!dateString) return 'No expiration';
+  return new Date(dateString).toLocaleDateString('en-US', {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric'
+  });
+};
+
+// Add a function to calculate days remaining
+const getDaysRemaining = (expiryDate: string | null | undefined): number | null => {
+  if (!expiryDate) return null;
+  const expiry = new Date(expiryDate);
+  const now = new Date();
+  if (expiry <= now) return 0;
+  
+  const diffTime = expiry.getTime() - now.getTime();
+  const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+  return diffDays;
+};
+
+// Add a function to check if discount is active
+const isDiscountActive = (rank: RankOption): boolean => {
+  if (!rank.discount) return false;
+  if (!rank.discount_expires_at) return true; // No expiry means active
+  return new Date(rank.discount_expires_at) > new Date();
+};
+
 export function OrderModal({ isOpen, onClose }: OrderModalProps) {
   // State variables
   const [username, setUsername] = useState('');
@@ -98,7 +127,8 @@ export function OrderModal({ isOpen, onClose }: OrderModalProps) {
           color: rank.color,
           image: rank.image_url || `https://i.imgur.com/placeholder.png`, // Ensure fallback
           description: rank.description,
-          discount: rank.discount
+          discount: rank.discount,
+          discount_expires_at: rank.discount_expires_at
         }));
         
         setRanks(formattedRanks);
@@ -201,7 +231,7 @@ export function OrderModal({ isOpen, onClose }: OrderModalProps) {
     }
   };
 
-  // Add a function to calculate the discounted price
+  // Update the existing getDiscountedPrice function
   const getDiscountedPrice = (price: number, discount?: number): string => {
     if (!discount) return price.toFixed(2);
     return ((price * (100 - discount)) / 100).toFixed(2);
@@ -513,31 +543,34 @@ export function OrderModal({ isOpen, onClose }: OrderModalProps) {
                   Select Rank
                 </label>
                 <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
-                  {ranks.map((rank) => (
-                    <button
-                      key={rank.name}
-                      type="button"
-                      onClick={() => handleRankSelect(rank.name)}
-                      className={`py-2 sm:py-3 px-2 sm:px-3 rounded-lg border transition-all transform hover:scale-[1.02] text-sm ${
-                        selectedRank === rank.name
-                          ? `bg-gradient-to-r ${rank.color} text-white border-transparent`
-                          : 'bg-gray-700/50 text-gray-300 border-gray-600 hover:bg-gray-600/50'
-                      }`}
-                    >
-                      <div className="font-medium truncate">{rank.name}</div>
-                      <div className="flex justify-center items-center gap-1">
-                        {rank.discount && rank.discount > 0 ? (
-                          <>
-                            <span className="line-through text-gray-400 text-xs">${rank.price.toFixed(2)}</span>
-                            <span className="text-xs sm:text-sm">${getDiscountedPrice(rank.price, rank.discount)}</span>
-                            <span className="bg-emerald-600 text-white text-[10px] px-1 rounded-sm ml-1">-{rank.discount}%</span>
-                          </>
-                        ) : (
-                          <span className="text-xs sm:text-sm">${rank.price.toFixed(2)}</span>
-                        )}
-                      </div>
-                    </button>
-                  ))}
+                  {ranks.map((rank) => {
+                    const isActive = isDiscountActive(rank);
+                    return (
+                      <button
+                        key={rank.name}
+                        type="button"
+                        onClick={() => handleRankSelect(rank.name)}
+                        className={`py-2 sm:py-3 px-2 sm:px-3 rounded-lg border transition-all transform hover:scale-[1.02] text-sm ${
+                          selectedRank === rank.name
+                            ? `bg-gradient-to-r ${rank.color} text-white border-transparent`
+                            : 'bg-gray-700/50 text-gray-300 border-gray-600 hover:bg-gray-600/50'
+                        }`}
+                      >
+                        <div className="font-medium truncate">{rank.name}</div>
+                        <div className="flex justify-center items-center gap-1">
+                          {rank.discount && rank.discount > 0 && isActive ? (
+                            <>
+                              <span className="line-through text-gray-400 text-xs">${rank.price.toFixed(2)}</span>
+                              <span className="text-xs sm:text-sm">${getDiscountedPrice(rank.price, rank.discount)}</span>
+                              <span className="bg-emerald-600 text-white text-[10px] px-1 rounded-sm ml-1">-{rank.discount}%</span>
+                            </>
+                          ) : (
+                            <span className="text-xs sm:text-sm">${rank.price.toFixed(2)}</span>
+                          )}
+                        </div>
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
 
@@ -566,15 +599,31 @@ export function OrderModal({ isOpen, onClose }: OrderModalProps) {
                   )}
                   
                   {/* Show discount badge if applicable */}
-                  {selectedRankOption.discount && selectedRankOption.discount > 0 && (
-                    <div className="mt-3 bg-emerald-900/20 border border-emerald-800 rounded p-2 flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <PercentIcon size={16} className="text-emerald-400" />
-                        <span className="text-emerald-400 text-sm font-medium">Discount Applied</span>
+                  {selectedRankOption && isDiscountActive(selectedRankOption) && selectedRankOption.discount && selectedRankOption.discount > 0 && (
+                    <div className="mt-3 bg-emerald-900/20 border border-emerald-800 rounded p-2">
+                      <div className="flex items-center justify-between mb-2">
+                        <div className="flex items-center gap-2">
+                          <PercentIcon size={16} className="text-emerald-400" />
+                          <span className="text-emerald-400 text-sm font-medium">Discount Applied</span>
+                        </div>
+                        <div className="bg-emerald-700 text-white text-xs font-bold rounded-full px-2 py-1">
+                          SAVE {selectedRankOption.discount}%
+                        </div>
                       </div>
-                      <div className="bg-emerald-700 text-white text-xs font-bold rounded-full px-2 py-1">
-                        SAVE {selectedRankOption.discount}%
-                      </div>
+                      
+                      {selectedRankOption.discount_expires_at && (
+                        <div className="flex items-center mt-1 text-xs text-gray-300">
+                          <Clock size={12} className="mr-1 text-emerald-400" />
+                          <span>
+                            Offer expires: {formatDate(selectedRankOption.discount_expires_at)}
+                            {getDaysRemaining(selectedRankOption.discount_expires_at) !== null && (
+                              <span className="ml-1 text-emerald-400">
+                                ({getDaysRemaining(selectedRankOption.discount_expires_at)} days left)
+                              </span>
+                            )}
+                          </span>
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
@@ -596,12 +645,18 @@ export function OrderModal({ isOpen, onClose }: OrderModalProps) {
                       loading="lazy"
                     />
                   </div>
-                  {selectedRankOption && selectedRankOption.discount && selectedRankOption.discount > 0 ? (
+                  {selectedRankOption && selectedRankOption.discount && selectedRankOption.discount > 0 && isDiscountActive(selectedRankOption) ? (
                     <div className="text-center mt-2">
                       <p className="text-xs sm:text-sm text-gray-400 line-through">Original: ${selectedRankOption.price.toFixed(2)}</p>
                       <p className="text-sm sm:text-base text-emerald-400 font-medium">
                         Amount: ${getDiscountedPrice(selectedRankOption.price, selectedRankOption.discount)}
                       </p>
+                      {selectedRankOption.discount_expires_at && (
+                        <p className="text-xs text-gray-400 mt-1 flex items-center justify-center">
+                          <Clock size={12} className="mr-1" />
+                          Limited offer! Expires {formatDate(selectedRankOption.discount_expires_at)}
+                        </p>
+                      )}
                     </div>
                   ) : (
                     <p className="text-xs sm:text-sm text-gray-400 mt-2">Amount: ${selectedRankPrice}</p>

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { RankOption } from '../types';
-import { Shield, DollarSign, Image, Save, Trash, RefreshCw, Plus, LogOut, Home, Lock, Tag, PercentIcon } from 'lucide-react';
+import { Shield, DollarSign, Image, Save, Trash, RefreshCw, Plus, LogOut, Home, Lock, Tag, PercentIcon, Calendar, Clock } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useNavigate, Link } from 'react-router-dom';
 import { proxyImage } from '../lib/imageProxy';
@@ -140,11 +140,13 @@ const Admin = () => {
       
       if (error) throw error;
       
-      // Add image field for component consistency
+      // Add image field for component consistency and handle discount expiry
       const ranksWithFormattedImages = data.map(rank => ({
         ...rank,
         image: rank.image_url, // Add image field that points to image_url for component use
-        discount: rank.discount || 0 // Ensure discount has a default value
+        discount: rank.discount || 0, // Ensure discount has a default value
+        is_discount_active: isDiscountActive(rank.discount, rank.discount_expires_at),
+        discount_days_remaining: getDaysRemaining(rank.discount_expires_at)
       }));
       
       setRanks(ranksWithFormattedImages || []);
@@ -251,9 +253,40 @@ const Admin = () => {
   };
 
   // Calculate discounted price
-  const getDiscountedPrice = (price: number, discount: number) => {
-    if (!discount) return price;
-    return (price * (100 - discount) / 100).toFixed(2);
+  const getDiscountedPrice = (price: number, discount?: number): string => {
+    if (!discount) return price.toFixed(2);
+    return ((price * (100 - discount)) / 100).toFixed(2);
+  };
+
+  // Format date for display
+  const formatDate = (dateString: string | null | undefined): string => {
+    if (!dateString) return 'No expiration';
+    return new Date(dateString).toLocaleDateString('en-US', {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit'
+    });
+  };
+
+  // Check if discount is active
+  const isDiscountActive = (discount: number, expiryDate: string | null | undefined): boolean => {
+    if (!discount) return false;
+    if (!expiryDate) return true; // No expiry means active
+    return new Date(expiryDate) > new Date();
+  };
+
+  // Get days remaining for a discount
+  const getDaysRemaining = (expiryDate: string | null | undefined): number | null => {
+    if (!expiryDate) return null;
+    const expiry = new Date(expiryDate);
+    const now = new Date();
+    if (expiry <= now) return 0;
+    
+    const diffTime = expiry.getTime() - now.getTime();
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    return diffDays;
   };
 
   if (isAuthLoading) {
@@ -651,7 +684,7 @@ const Admin = () => {
                       Manage Discounts
                     </h2>
                     <p className="text-gray-400 text-sm mt-1">
-                      Set discount percentages for each rank. Discounts will be applied automatically on the store.
+                      Set discount percentages and expiration dates for each rank. Discounts will be applied automatically on the store.
                     </p>
                   </div>
                   
@@ -663,9 +696,18 @@ const Admin = () => {
                             <div 
                               className={`w-8 h-8 rounded-full mr-2 flex items-center justify-center bg-gradient-to-r ${rank.color}`}
                             >
-                              {rank.discount > 0 && <PercentIcon size={16} />}
+                              {rank.is_discount_active && <PercentIcon size={16} />}
                             </div>
                             <h3 className="font-medium">{rank.name}</h3>
+                            {rank.is_discount_active && (
+                              <div className="ml-auto bg-emerald-700/30 text-emerald-400 text-xs px-2 py-1 rounded-full flex items-center">
+                                <Clock size={12} className="mr-1" />
+                                {rank.discount_days_remaining === null 
+                                  ? 'No Expiry' 
+                                  : `${rank.discount_days_remaining} day${rank.discount_days_remaining !== 1 ? 's' : ''} left`
+                                }
+                              </div>
+                            )}
                           </div>
                           
                           <div className="flex items-center mb-3">
@@ -695,7 +737,36 @@ const Admin = () => {
                             </div>
                           </div>
                           
-                          {rank.discount > 0 && (
+                          <div className="mb-3">
+                            <label htmlFor={`expiry-${rank.id}`} className="block text-sm text-gray-400 mb-1 flex items-center">
+                              <Calendar size={14} className="mr-1" />
+                              Discount Expiration Date
+                            </label>
+                            <div className="flex">
+                              <input
+                                id={`expiry-${rank.id}`}
+                                type="datetime-local"
+                                value={rank.discount_expires_at ? new Date(rank.discount_expires_at).toISOString().slice(0, 16) : ''}
+                                onChange={(e) => handleRankChange(rank.id, 'discount_expires_at', e.target.value ? new Date(e.target.value).toISOString() : null)}
+                                className="bg-gray-800 border border-gray-600 rounded-l p-2 w-full"
+                              />
+                              <button 
+                                type="button"
+                                onClick={() => handleRankChange(rank.id, 'discount_expires_at', null)}
+                                className="bg-gray-700 px-2 py-2 rounded-r border-t border-r border-b border-gray-600 text-xs"
+                                title="Remove expiration date"
+                              >
+                                ∞
+                              </button>
+                            </div>
+                            <p className="text-xs text-gray-400 mt-1">
+                              {rank.discount_expires_at 
+                                ? `Expires: ${formatDate(rank.discount_expires_at)}` 
+                                : 'No expiration date (discount never expires)'}
+                            </p>
+                          </div>
+                          
+                          {rank.is_discount_active && rank.discount > 0 && (
                             <div className="mb-3 bg-emerald-900/20 border border-emerald-800 rounded p-2 flex items-center justify-between">
                               <div>
                                 <div className="text-sm text-emerald-400">Discounted price:</div>
@@ -707,9 +778,19 @@ const Admin = () => {
                             </div>
                           )}
                           
+                          {rank.discount > 0 && !rank.is_discount_active && (
+                            <div className="mb-3 bg-red-900/20 border border-red-800 rounded p-2">
+                              <div className="text-sm text-red-400">Discount expired</div>
+                              <p className="text-xs text-gray-400 mt-1">
+                                This discount is not active because it expired on {formatDate(rank.discount_expires_at)}
+                              </p>
+                            </div>
+                          )}
+                          
                           <button
                             onClick={() => handleUpdateRank(rank.id, {
-                              discount: rank.discount || 0
+                              discount: rank.discount || 0,
+                              discount_expires_at: rank.discount_expires_at
                             })}
                             className="w-full mt-2 py-2 bg-blue-600 hover:bg-blue-700 rounded text-center transition-colors"
                             disabled={saving}
