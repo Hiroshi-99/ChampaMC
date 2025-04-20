@@ -107,6 +107,12 @@ export function OrderModal({ isOpen, onClose }: OrderModalProps) {
   const [isReceiptOpen, setIsReceiptOpen] = useState(false);
   const [completedOrder, setCompletedOrder] = useState<Order | null>(null);
 
+  // Add state for payment QR code
+  const [paymentQrCode, setPaymentQrCode] = useState<string>("https://i.imgur.com/xmzqO4S.jpeg");
+
+  // Add error state for payment image
+  const [paymentImageError, setPaymentImageError] = useState(false);
+
   // Load ranks from database on component mount
   useEffect(() => {
     async function loadRanks() {
@@ -170,6 +176,34 @@ export function OrderModal({ isOpen, onClose }: OrderModalProps) {
     }
   }, [isOpen]);
 
+  // Load payment details when modal opens
+  useEffect(() => {
+    async function loadPaymentDetails() {
+      try {
+        const { data, error } = await supabase
+          .from('store_settings')
+          .select('value')
+          .eq('key', 'payment_details')
+          .single();
+        
+        if (error) {
+          console.error('Error loading payment details:', error);
+          return;
+        }
+        
+        if (data?.value?.qr_image_url) {
+          setPaymentQrCode(data.value.qr_image_url);
+        }
+      } catch (error) {
+        console.error('Failed to load payment QR code:', error);
+      }
+    }
+    
+    if (isOpen) {
+      loadPaymentDetails();
+    }
+  }, [isOpen]);
+
   // Memoize selected rank to avoid recalculation on each render
   const selectedRankOption = useMemo(() => 
     ranks.find(rank => rank.name === selectedRank), 
@@ -200,6 +234,55 @@ export function OrderModal({ isOpen, onClose }: OrderModalProps) {
 
   const handleRankSelect = useCallback((rankName: string) => {
     setSelectedRank(rankName);
+  }, []);
+
+  // Improve file upload error handling
+  const handleFileUpload = async (file: File, filePath: string): Promise<{path: string, url: string}> => {
+    try {
+      // Upload file to Supabase storage
+      const { error: uploadError, data } = await supabase.storage
+        .from('payment-proofs')
+        .upload(filePath, file, {
+          cacheControl: '3600',
+          upsert: false,
+          contentType: file.type
+        });
+
+      if (uploadError) {
+        console.error('Upload error:', uploadError);
+        
+        // Handle specific CSP or connection issues
+        if (uploadError.message?.includes('network') || 
+            uploadError.message?.includes('Failed to fetch')) {
+          throw new Error('Network error during upload. Check your connection or try again later.');
+        }
+        
+        throw new Error('Failed to upload payment proof. Please try again.');
+      }
+
+      if (!data || !data.path) {
+        throw new Error('Upload failed. No data returned.');
+      }
+      
+      // Construct the public URL
+      const publicUrl = getPublicStorageUrl('payment-proofs', filePath);
+      
+      return {
+        path: data.path,
+        url: publicUrl
+      };
+    } catch (error) {
+      console.error('File upload failed:', error);
+      throw error;
+    }
+  };
+
+  // Handle payment image error
+  const handlePaymentImageError = useCallback(() => {
+    console.error('Failed to load payment QR code image');
+    setPaymentImageError(true);
+    // Fall back to default image
+    setPaymentQrCode("https://i.imgur.com/xmzqO4S.jpeg");
   }, []);
 
   // Early return if modal is not open
@@ -273,28 +356,10 @@ export function OrderModal({ isOpen, onClose }: OrderModalProps) {
       let publicUrl;
       
       try {
-        // Upload file to Supabase storage
-        const { error: uploadError, data } = await supabase.storage
-          .from('payment-proofs')
-          .upload(filePath, paymentProof, {
-            cacheControl: '3600',
-            upsert: false,
-            contentType: paymentProof.type
-          });
-
-        if (uploadError) {
-          console.error('Upload error:', uploadError);
-          throw new Error('Failed to upload payment proof. Please try again.');
-        }
-
-        if (!data || !data.path) {
-          throw new Error('Upload failed. No data returned.');
-        }
-        
-        uploadData = data;
-
-        // Construct the public URL
-        publicUrl = getPublicStorageUrl('payment-proofs', filePath);
+        // Use the new file upload helper method
+        const uploadResult = await handleFileUpload(paymentProof, filePath);
+        uploadData = { path: uploadResult.path };
+        publicUrl = uploadResult.url;
       } catch (uploadErr) {
         console.error('File upload failed:', uploadErr);
         // In demo mode, continue with a placeholder URL
@@ -414,6 +479,13 @@ export function OrderModal({ isOpen, onClose }: OrderModalProps) {
       
       if (error instanceof Error) {
         errorMessage = error.message;
+      }
+      
+      // Check for possible CSP or network-related errors
+      if (errorMessage.includes('network') || 
+          errorMessage.includes('Failed to fetch') ||
+          errorMessage.includes('Content Security Policy')) {
+        errorMessage = 'Network or security policy error. Please try again or contact support.';
       }
       
       // Offer demo mode if it's a database error
@@ -639,11 +711,18 @@ export function OrderModal({ isOpen, onClose }: OrderModalProps) {
                   <p className="text-gray-300 mb-3 text-sm sm:text-base">Scan the QR code below to pay:</p>
                   <div className="bg-white p-2 sm:p-4 rounded-lg inline-block">
                     <img 
-                      src="https://i.imgur.com/xmzqO4S.jpeg" 
+                      src={paymentQrCode} 
                       alt="Payment QR Code"
                       className="w-36 h-36 sm:w-48 sm:h-48 mx-auto"
                       loading="lazy"
+                      onError={handlePaymentImageError}
                     />
+                    {paymentImageError && (
+                      <div className="mt-2 text-red-500 text-xs">
+                        <p>Error loading payment QR code.</p>
+                        <p>Using default image.</p>
+                      </div>
+                    )}
                   </div>
                   {selectedRankOption && selectedRankOption.discount && selectedRankOption.discount > 0 && isDiscountActive(selectedRankOption) ? (
                     <div className="text-center mt-2">

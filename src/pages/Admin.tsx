@@ -63,38 +63,121 @@ const Admin = () => {
     loadGradientPresets();
   }, []);
 
-  // Set up real-time auto-refresh for data
+  // Set up polling for orders when authenticated as admin
   useEffect(() => {
-    let intervalId: NodeJS.Timeout | null = null;
+    let pollInterval: NodeJS.Timeout | null = null;
     
-    if (isAdmin && autoRefreshEnabled) {
-      // Auto-refresh data every 30 seconds
-      intervalId = setInterval(() => {
-        refreshAllData();
-        setLastUpdateTime(new Date());
-      }, 30000); // 30 seconds
+    if (isAdmin) {
+      // Instead of using realtime subscriptions (blocked by CSP WebSocket restrictions),
+      // use polling to periodically check for new orders
+      pollInterval = setInterval(async () => {
+        try {
+          // Check for new orders since last check
+          const lastOrderTime = realtimeNotifications[0]?.timestamp || new Date().toISOString();
+          
+          // Fetch any new orders
+          const { data: newOrders, error } = await supabase
+            .from('orders')
+            .select('*')
+            .gt('created_at', lastOrderTime)
+            .order('created_at', { ascending: false });
+            
+          if (error) throw error;
+          
+          if (newOrders && newOrders.length > 0) {
+            // Add to notifications
+            const updatedNotifications = newOrders.map(newOrder => ({
+              id: newOrder.id, 
+              type: 'new_order', 
+              message: `New order #${newOrder.id.substring(0, 8)} (${newOrder.status})`,
+              timestamp: newOrder.created_at,
+              data: newOrder
+            }));
+            
+            setRealtimeNotifications(prev => [
+              ...updatedNotifications,
+              ...prev.slice(0, Math.max(0, 10 - updatedNotifications.length))
+            ]);
+            
+            // Increment realtime order counter
+            setRealtimeOrderCount(prev => prev + newOrders.length);
+            
+            // Update stats if they exist
+            if (orderStats) {
+              setOrderStats((prev: {
+                total_orders: number;
+                pending_orders: number;
+                [key: string]: any;
+              }) => ({
+                ...prev,
+                total_orders: prev.total_orders + newOrders.length,
+                pending_orders: prev.pending_orders + newOrders.filter(o => o.status === 'pending').length
+              }));
+            }
+            
+            // Show toast notification
+            if (newOrders.length === 1) {
+              toast.success('New order received!', {
+                icon: '🛒',
+                duration: 5000,
+              });
+            } else if (newOrders.length > 1) {
+              toast.success(`${newOrders.length} new orders received!`, {
+                icon: '🛒',
+                duration: 5000,
+              });
+            }
+          }
+          
+          // Check for order status updates
+          const { data: updatedOrders, error: updatedError } = await supabase
+            .from('orders')
+            .select('*')
+            .gt('updated_at', lastOrderTime)
+            .neq('created_at', 'updated_at') // Only get ones that were updated after creation
+            .order('updated_at', { ascending: false });
+            
+          if (updatedError) throw updatedError;
+          
+          if (updatedOrders && updatedOrders.length > 0) {
+            // Add to notifications
+            const updatedNotifications = updatedOrders.map(updatedOrder => ({
+              id: updatedOrder.id, 
+              type: 'updated_order', 
+              message: `Order #${updatedOrder.id.substring(0, 8)} updated to ${updatedOrder.status}`,
+              timestamp: updatedOrder.updated_at,
+              data: updatedOrder
+            }));
+            
+            setRealtimeNotifications(prev => [
+              ...updatedNotifications,
+              ...prev.slice(0, Math.max(0, 10 - updatedNotifications.length))
+            ]);
+          }
+          
+          // Poll for payment settings changes
+          const { data: settingsData, error: settingsError } = await supabase
+            .from('store_settings')
+            .select('value')
+            .eq('key', 'payment_details')
+            .single();
+          
+          if (!settingsError && settingsData?.value?.qr_image_url && 
+              settingsData.value.qr_image_url !== paymentImageUrl) {
+            setPaymentImageUrl(settingsData.value.qr_image_url);
+            toast.success('Payment details updated', { duration: 3000 });
+          }
+        } catch (error) {
+          console.error('Polling error:', error);
+        }
+      }, 10000); // Poll every 10 seconds
     }
     
+    // Cleanup poll interval on unmount
     return () => {
-      if (intervalId) clearInterval(intervalId);
+      if (pollInterval) clearInterval(pollInterval);
     };
-  }, [isAdmin, autoRefreshEnabled]);
-
-  // Function to refresh all data
-  const refreshAllData = useCallback(async () => {
-    if (!isAdmin) return;
-    
-    try {
-      await Promise.all([
-        loadRanks(),
-        loadOrderStats(),
-        loadPaymentDetails()
-      ]);
-      console.log('Data refreshed automatically at', new Date().toLocaleTimeString());
-    } catch (error) {
-      console.error('Error in auto-refresh:', error);
-    }
-  }, [isAdmin]);
+  }, [isAdmin, orderStats, realtimeNotifications, paymentImageUrl]);
 
   // Load gradient presets from local data instead of external API
   const loadGradientPresets = async () => {
@@ -260,136 +343,6 @@ const Admin = () => {
   const generateGradientCss = (startColor: string, endColor: string): string => {
     return `linear-gradient(to right, ${startColor}, ${endColor})`;
   };
-
-  // Set up real-time listeners for orders when authenticated as admin
-  useEffect(() => {
-    let orderSubscription: any = null;
-    let settingsSubscription: any = null;
-    
-    if (isAdmin) {
-      // Subscribe to new orders
-      orderSubscription = supabase
-        .channel('orders-changes')
-        .on(
-          'postgres_changes',
-          { event: 'INSERT', schema: 'public', table: 'orders' },
-          (payload) => {
-            const newOrder = payload.new;
-            // Add to notifications
-            setRealtimeNotifications(prev => [
-              { 
-                id: newOrder.id, 
-                type: 'new_order', 
-                message: `New order #${newOrder.id.substring(0, 8)} (${newOrder.status})`,
-                timestamp: new Date().toISOString(),
-                data: newOrder
-              },
-              ...prev.slice(0, 9) // Keep only last 10 notifications
-            ]);
-            
-            // Increment realtime order counter
-            setRealtimeOrderCount(prev => prev + 1);
-            
-            // Update stats if they exist
-            if (orderStats) {
-              setOrderStats((prev: {
-                total_orders: number;
-                pending_orders: number;
-                [key: string]: any;
-              }) => ({
-                ...prev,
-                total_orders: prev.total_orders + 1,
-                pending_orders: prev.pending_orders + 1
-              }));
-            }
-            
-            // Show toast notification
-            toast.success('New order received!', {
-              icon: '🛒',
-              duration: 5000,
-            });
-          }
-        )
-        .on(
-          'postgres_changes',
-          { event: 'UPDATE', schema: 'public', table: 'orders' },
-          (payload) => {
-            const updatedOrder = payload.new;
-            // Add to notifications
-            setRealtimeNotifications(prev => [
-              { 
-                id: updatedOrder.id, 
-                type: 'updated_order', 
-                message: `Order #${updatedOrder.id.substring(0, 8)} updated to ${updatedOrder.status}`,
-                timestamp: new Date().toISOString(),
-                data: updatedOrder
-              },
-              ...prev.slice(0, 9) // Keep only last 10 notifications
-            ]);
-          }
-        )
-        .subscribe();
-      
-      // Subscribe to settings changes (for payment image updates)
-      settingsSubscription = supabase
-        .channel('settings-changes')
-        .on(
-          'postgres_changes',
-          { event: 'UPDATE', schema: 'public', table: 'store_settings' },
-          (payload) => {
-            const updatedSetting = payload.new;
-            if (updatedSetting.key === 'payment_details') {
-              // Update payment image URL if it was changed in another admin session
-              const paymentDetails = updatedSetting.value;
-              setPaymentImageUrl(paymentDetails.qr_image_url);
-              toast.success('Payment details updated', { duration: 3000 });
-            }
-          }
-        )
-        .subscribe();
-    }
-    
-    // Cleanup subscriptions on unmount
-    return () => {
-      if (orderSubscription) orderSubscription.unsubscribe();
-      if (settingsSubscription) settingsSubscription.unsubscribe();
-    };
-  }, [isAdmin, orderStats]);
-
-  // Subscribe to order changes
-  useEffect(() => {
-    if (!user) return;
-    
-    // Subscribe to all new orders
-    const orderSubscription = supabase
-      .channel('orders-channel')
-      .on(
-        'postgres_changes',
-        {
-          event: 'INSERT',
-          schema: 'public',
-          table: 'orders'
-        },
-        (payload) => {
-          // Add the new order to the state
-          setOrdersData((prev: Order[] | null) => {
-            if (!prev) return [payload.new as Order];
-            return [payload.new as Order, ...prev];
-          });
-          
-          // Show notification for new order
-          toast.success('New order received!', {
-            position: 'top-right',
-            duration: 5000,
-          });
-        }
-      )
-      .subscribe();
-      
-    return () => {
-      supabase.removeChannel(orderSubscription);
-    };
-  }, [user]);
 
   // Check if user is authenticated and an admin
   const checkAuth = async () => {
@@ -809,6 +762,78 @@ const Admin = () => {
     });
   };
 
+  // Set up real-time auto-refresh for data
+  useEffect(() => {
+    let intervalId: NodeJS.Timeout | null = null;
+    
+    if (isAdmin && autoRefreshEnabled) {
+      // Auto-refresh data every 30 seconds
+      intervalId = setInterval(() => {
+        // Manually refresh all data instead of using real-time subscriptions
+        Promise.all([
+          loadRanks(),
+          loadOrderStats(),
+          loadPaymentDetails()
+        ]).then(() => {
+          console.log('Data refreshed automatically at', new Date().toLocaleTimeString());
+          setLastUpdateTime(new Date());
+        }).catch(error => {
+          console.error('Error in auto-refresh:', error);
+        });
+      }, 30000); // 30 seconds
+    }
+    
+    return () => {
+      if (intervalId) clearInterval(intervalId);
+    };
+  }, [isAdmin, autoRefreshEnabled]);
+
+  // Manual refresh function for refresh button
+  const manualRefresh = () => {
+    Promise.all([
+      loadRanks(),
+      loadOrderStats(),
+      loadPaymentDetails()
+    ]).then(() => {
+      setLastUpdateTime(new Date());
+      toast.success('Data refreshed');
+    }).catch(error => {
+      console.error('Error refreshing data:', error);
+      toast.error('Failed to refresh data');
+    });
+  };
+
+  // Poll for new orders data
+  useEffect(() => {
+    if (!isAdmin) return;
+    
+    const pollOrdersData = async () => {
+      try {
+        const { data, error } = await supabase
+          .from('orders')
+          .select('*')
+          .order('created_at', { ascending: false })
+          .limit(20);
+        
+        if (error) throw error;
+        
+        if (data) {
+          setOrdersData(data as Order[]);
+        }
+      } catch (error) {
+        console.error('Failed to poll orders data:', error);
+      }
+    };
+    
+    // Initial load
+    pollOrdersData();
+    
+    // Set up polling interval
+    const pollInterval = setInterval(pollOrdersData, 15000); // Every 15 seconds
+    
+    return () => clearInterval(pollInterval);
+  }, [isAdmin]);
+
   if (isAuthLoading) {
     return (
       <div className="min-h-screen bg-gray-900 flex items-center justify-center">
@@ -967,9 +992,7 @@ const Admin = () => {
             
             <button 
               onClick={() => {
-                refreshAllData();
-                setLastUpdateTime(new Date());
-                toast.success('Data refreshed');
+                manualRefresh();
               }} 
               className="p-2 rounded-full hover:bg-gray-700 transition-colors"
               title="Refresh data"

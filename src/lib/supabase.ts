@@ -24,11 +24,9 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   },
   global: {
     fetch: customFetch, // Use custom fetch with timeout
-  },
-  // Default timeout for queries (8 seconds)
-  realtime: {
-    timeout: 8000,
-  },
+  }
+  // Note: Realtime features will not work due to CSP restrictions
+  // that block WebSocket connections to supabase.co
 });
 
 // Extract base domain for storage URLs - used for proper storage URL construction
