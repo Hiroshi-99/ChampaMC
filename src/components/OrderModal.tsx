@@ -789,42 +789,82 @@ export function OrderModal({ isOpen, onClose }: OrderModalProps) {
 
               {/* Rank Selection */}
               <div>
-                <label className="block text-sm font-medium text-gray-300 mb-1">
+                <label className="block text-sm font-medium text-gray-300 mb-1 flex items-center gap-2">
+                  <Tag size={16} className="text-emerald-400" />
                   Select Rank
                 </label>
-                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
                   {ranks.map((rank) => {
                     const isActive = isDiscountActive(rank);
+                    const isSelected = selectedRank === rank.name;
+                    const discountedPrice = isActive && rank.discount 
+                      ? ((rank.price * (100 - rank.discount)) / 100).toFixed(2) 
+                      : rank.price.toFixed(2);
+                    
                     return (
                       <button
                         key={rank.name}
                         type="button"
                         onClick={() => handleRankSelect(rank.name)}
-                        className={`py-2 sm:py-3 px-2 sm:px-3 rounded-lg border transition-all transform hover:scale-[1.02] text-sm ${
-                          selectedRank === rank.name
-                            ? `bg-gradient-to-r ${rank.color} text-white border-transparent`
-                            : 'bg-gray-700/50 text-gray-300 border-gray-600 hover:bg-gray-600/50'
+                        className={`relative p-3 rounded-lg border transition-all focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-offset-gray-800 ${
+                          isSelected
+                            ? `bg-gradient-to-r ${rank.color} text-white border-transparent focus:ring-white`
+                            : 'bg-gray-700/50 text-gray-300 border-gray-600 hover:bg-gray-600/50 focus:ring-emerald-400'
                         }`}
+                        aria-pressed={isSelected}
+                        aria-label={`Select ${rank.name} rank for $${discountedPrice}`}
                       >
-                        <div className="font-medium truncate">{rank.name}</div>
-                        <div className="flex justify-center items-center gap-1">
-                          {rank.discount && rank.discount > 0 && isActive ? (
-                            <>
-                              <span className="line-through text-gray-400 text-xs">${rank.price.toFixed(2)}</span>
-                              <span className="text-xs sm:text-sm font-bold text-emerald-400">${getDiscountedPrice(rank.price, rank.discount)}</span>
-                              <div className="bg-emerald-600 text-white text-[10px] px-1 py-0.5 rounded-full ml-1 flex items-center">
-                                <PercentIcon size={10} className="mr-0.5" />
-                                {rank.discount}%
-                              </div>
-                            </>
-                          ) : (
-                            <span className="text-xs sm:text-sm">${rank.price.toFixed(2)}</span>
-                          )}
+                        {isSelected && (
+                          <span className="absolute top-1 right-1 w-2 h-2 bg-white rounded-full"></span>
+                        )}
+                        <div className="flex justify-between items-center mb-2">
+                          <div className="font-medium text-base">{rank.name}</div>
+                          <div className="flex items-center gap-1">
+                            {rank.discount && rank.discount > 0 && isActive ? (
+                              <>
+                                <span className="line-through text-gray-400 text-xs">${rank.price.toFixed(2)}</span>
+                                <span className="text-sm font-bold text-emerald-400">${discountedPrice}</span>
+                              </>
+                            ) : (
+                              <span className="text-sm">${rank.price.toFixed(2)}</span>
+                            )}
+                          </div>
                         </div>
+                        
+                        {/* Discount Badge */}
+                        {rank.discount && rank.discount > 0 && isActive && (
+                          <div className="bg-emerald-600 text-white text-xs px-2 py-0.5 rounded absolute top-2 right-2 flex items-center">
+                            <PercentIcon size={10} className="mr-0.5" />
+                            {rank.discount}% OFF
+                          </div>
+                        )}
+                        
+                        {/* Rank Description */}
+                        {rank.description && (
+                          <p className="mt-1 text-xs text-gray-300 line-clamp-2">{rank.description}</p>
+                        )}
+                        
+                        {/* Expiry Info */}
+                        {rank.discount && rank.discount > 0 && isActive && rank.discount_expires_at && (() => {
+                          const daysRemaining = getDaysRemaining(rank.discount_expires_at);
+                          return daysRemaining !== null && daysRemaining <= 7 ? (
+                            <div className="mt-2 text-xs text-gray-400 flex items-center">
+                              <Clock size={10} className="mr-1" />
+                              <span className="text-amber-400">Ends in {daysRemaining} days</span>
+                            </div>
+                          ) : null;
+                        })()}
                       </button>
                     );
                   })}
                 </div>
+                
+                {/* No ranks fallback */}
+                {ranks.length === 0 && !ranksLoading && (
+                  <div className="bg-gray-700/50 p-4 rounded-lg border border-gray-600 text-center">
+                    <p className="text-gray-400">No ranks available. Please try again later.</p>
+                  </div>
+                )}
               </div>
 
               {/* Rank Preview Section */}
