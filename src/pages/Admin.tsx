@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { supabase } from '../lib/supabase';
+import { supabase, getPublicStorageUrl } from '../lib/supabase';
 import { RankOption } from '../types';
-import { Shield, DollarSign, Image, Save, Trash, RefreshCw, Plus, LogOut, Home, Lock, Tag, PercentIcon, Calendar, Clock, Check, Info, Settings, Upload, Eye, CreditCard, Bell, Palette } from 'lucide-react';
+import { Shield, DollarSign, Image, Save, Trash, RefreshCw, Plus, LogOut, Home, Lock, Tag, PercentIcon, Calendar, Clock, Check, Info, Settings, Upload, Eye, CreditCard, Bell, Palette, X } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useNavigate, Link } from 'react-router-dom';
 import { proxyImage } from '../lib/imageProxy';
@@ -57,6 +57,10 @@ const Admin = () => {
   const [autoRefreshEnabled, setAutoRefreshEnabled] = useState(true);
   const [lastUpdateTime, setLastUpdateTime] = useState<Date>(new Date());
   const [orderStatusMap, setOrderStatusMap] = useState<Record<string, string>>({});
+  const [orders, setOrders] = useState<Order[]>([]);
+  const [loadingOrders, setLoadingOrders] = useState(false);
+  const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
+  const [orderDetailsOpen, setOrderDetailsOpen] = useState(false);
 
   // Check authentication status on component mount
   useEffect(() => {
@@ -874,6 +878,94 @@ const Admin = () => {
     return () => clearInterval(pollInterval);
   }, [isAdmin]);
 
+  // Function to load orders
+  const loadOrders = async () => {
+    setLoadingOrders(true);
+    try {
+      const { data, error } = await supabase
+        .from('orders')
+        .select('*')
+        .order('created_at', { ascending: false });
+      
+      if (error) throw error;
+      setOrders(data || []);
+      
+      // Update the status map
+      const newStatusMap: Record<string, string> = {};
+      data?.forEach(order => {
+        newStatusMap[order.id] = order.status;
+      });
+      setOrderStatusMap(newStatusMap);
+    } catch (error: any) {
+      console.error('Error loading orders:', error);
+      toast.error('Failed to load orders');
+    } finally {
+      setLoadingOrders(false);
+    }
+  };
+
+  // Load orders when tab is selected
+  useEffect(() => {
+    if (activeTab === 'orders' && isAdmin) {
+      loadOrders();
+    }
+  }, [activeTab, isAdmin]);
+
+  // Function to update order status
+  const updateOrderStatus = async (orderId: string, newStatus: 'pending' | 'completed' | 'rejected') => {
+    try {
+      // Update the database
+      const { error } = await supabase
+        .from('orders')
+        .update({ status: newStatus })
+        .eq('id', orderId);
+      
+      if (error) throw error;
+      
+      // Update local state
+      setOrders(prevOrders => 
+        prevOrders.map(order => 
+          order.id === orderId ? { ...order, status: newStatus } : order
+        )
+      );
+      
+      // Update status map
+      setOrderStatusMap(prev => ({
+        ...prev,
+        [orderId]: newStatus
+      }));
+      
+      // Update stats
+      loadOrderStats();
+      
+      // Show success message
+      toast.success(`Order #${orderId.substring(0, 8)} marked as ${newStatus}`);
+      
+      // Add a notification
+      const affectedOrder = orders.find(o => o.id === orderId);
+      if (affectedOrder) {
+        const notification = {
+          id: `${orderId}-${newStatus}-${Date.now()}`,
+          type: 'updated_order',
+          message: `Order #${orderId.substring(0, 8)} updated to ${newStatus}`,
+          timestamp: new Date().toISOString(),
+          data: { ...affectedOrder, status: newStatus }
+        };
+        
+        setRealtimeNotifications(prev => [notification, ...prev.slice(0, 9)]);
+      }
+    } catch (error: any) {
+      console.error('Error updating order status:', error);
+      toast.error('Failed to update order status');
+    }
+  };
+
+  // Function to view order details
+  const viewOrderDetails = (order: Order) => {
+    setSelectedOrder(order);
+    setOrderDetailsOpen(true);
+  };
+
   if (isAuthLoading) {
     return (
       <div className="min-h-screen bg-gray-900 flex items-center justify-center">
@@ -1170,6 +1262,17 @@ const Admin = () => {
             >
               <PercentIcon size={18} />
               <span>Discounts</span>
+            </button>
+            <button 
+              onClick={() => setActiveTab('orders')} 
+              className={`py-3 px-4 flex items-center space-x-2 border-b-2 ${
+                activeTab === 'orders' 
+                  ? 'border-emerald-500 text-emerald-400' 
+                  : 'border-transparent hover:border-gray-600'
+              } transition-colors`}
+            >
+              <DollarSign size={18} />
+              <span>Orders</span>
             </button>
             <button 
               onClick={() => setActiveTab('settings')} 
@@ -1739,6 +1842,245 @@ const Admin = () => {
                       ))}
                     </div>
                   </div>
+                </div>
+              )}
+              
+              {/* Orders Tab */}
+              {activeTab === 'orders' && (
+                <div>
+                  <div className="p-4 bg-gray-750 border-b border-gray-700">
+                    <h2 className="text-lg font-semibold flex items-center">
+                      <DollarSign size={18} className="text-emerald-400 mr-2" />
+                      Manage Orders
+                    </h2>
+                    <p className="text-gray-400 text-sm mt-1">
+                      View and manage all orders. Update status, view details, and track payments.
+                    </p>
+                  </div>
+                  
+                  {loadingOrders ? (
+                    <div className="p-8 text-center">
+                      <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-emerald-500 mx-auto mb-4"></div>
+                      <p>Loading orders...</p>
+                    </div>
+                  ) : (
+                    <div className="overflow-x-auto">
+                      <table className="w-full table-auto">
+                        <thead className="bg-gray-700">
+                          <tr>
+                            <th className="p-3 text-left">ID</th>
+                            <th className="p-3 text-left">Username</th>
+                            <th className="p-3 text-left">Platform</th>
+                            <th className="p-3 text-left">Rank</th>
+                            <th className="p-3 text-left">Price</th>
+                            <th className="p-3 text-left">Status</th>
+                            <th className="p-3 text-left">Date</th>
+                            <th className="p-3 text-right">Actions</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-700">
+                          {orders.length === 0 ? (
+                            <tr>
+                              <td colSpan={8} className="p-4 text-center text-gray-400">
+                                No orders found
+                              </td>
+                            </tr>
+                          ) : (
+                            orders.map(order => (
+                              <tr key={order.id} className="hover:bg-gray-750">
+                                <td className="p-3 font-mono text-xs">
+                                  {order.id.substring(0, 8)}...
+                                </td>
+                                <td className="p-3">{order.username}</td>
+                                <td className="p-3 capitalize">{order.platform}</td>
+                                <td className="p-3">{order.rank}</td>
+                                <td className="p-3">${order.price?.toFixed(2) || "0.00"}</td>
+                                <td className="p-3">
+                                  <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                                    order.status === 'completed' ? 'bg-green-900/50 text-green-400' :
+                                    order.status === 'rejected' ? 'bg-red-900/50 text-red-400' :
+                                    'bg-yellow-900/50 text-yellow-400'
+                                  }`}>
+                                    {order.status}
+                                  </span>
+                                </td>
+                                <td className="p-3 text-xs text-gray-400">
+                                  {new Date(order.created_at).toLocaleString()}
+                                </td>
+                                <td className="p-3 text-right space-x-1">
+                                  <button
+                                    onClick={() => viewOrderDetails(order)}
+                                    className="px-2 py-1 bg-blue-600 hover:bg-blue-700 rounded text-xs transition-colors inline-flex items-center"
+                                  >
+                                    <Eye size={12} className="mr-1" />
+                                    View
+                                  </button>
+                                  
+                                  {order.status !== 'completed' && (
+                                    <button
+                                      onClick={() => updateOrderStatus(order.id, 'completed')}
+                                      className="px-2 py-1 bg-green-600 hover:bg-green-700 rounded text-xs transition-colors inline-flex items-center"
+                                    >
+                                      <Check size={12} className="mr-1" />
+                                      Complete
+                                    </button>
+                                  )}
+                                  
+                                  {order.status !== 'rejected' && (
+                                    <button
+                                      onClick={() => updateOrderStatus(order.id, 'rejected')}
+                                      className="px-2 py-1 bg-red-600 hover:bg-red-700 rounded text-xs transition-colors inline-flex items-center"
+                                    >
+                                      <X size={12} className="mr-1" />
+                                      Reject
+                                    </button>
+                                  )}
+                                  
+                                  {order.status !== 'pending' && (
+                                    <button
+                                      onClick={() => updateOrderStatus(order.id, 'pending')}
+                                      className="px-2 py-1 bg-yellow-600 hover:bg-yellow-700 rounded text-xs transition-colors inline-flex items-center"
+                                    >
+                                      <RefreshCw size={12} className="mr-1" />
+                                      Pending
+                                    </button>
+                                  )}
+                                </td>
+                              </tr>
+                            ))
+                          )}
+                        </tbody>
+                      </table>
+                      
+                      <div className="p-4 border-t border-gray-700 flex justify-between items-center">
+                        <div className="text-sm text-gray-400">
+                          {orders.length} {orders.length === 1 ? 'order' : 'orders'} total
+                        </div>
+                        <button
+                          onClick={loadOrders}
+                          className="px-3 py-1 bg-gray-600 hover:bg-gray-500 rounded text-xs transition-colors inline-flex items-center"
+                        >
+                          <RefreshCw size={12} className="mr-1" />
+                          Refresh Orders
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                  
+                  {/* Order Details Modal (simplified) */}
+                  {selectedOrder && orderDetailsOpen && (
+                    <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+                      <div className="bg-gray-800 rounded-lg p-4 max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+                        <div className="flex justify-between items-start mb-4">
+                          <h3 className="text-xl font-bold">
+                            Order Details #{selectedOrder.id.substring(0, 8)}
+                          </h3>
+                          <button 
+                            onClick={() => setOrderDetailsOpen(false)}
+                            className="p-1 rounded-full hover:bg-gray-700"
+                          >
+                            <X size={20} />
+                          </button>
+                        </div>
+                        
+                        <div className="grid grid-cols-2 gap-4 mb-4">
+                          <div>
+                            <h4 className="text-sm text-gray-400 mb-1">Username</h4>
+                            <p className="font-medium">{selectedOrder.username}</p>
+                          </div>
+                          <div>
+                            <h4 className="text-sm text-gray-400 mb-1">Platform</h4>
+                            <p className="font-medium capitalize">{selectedOrder.platform}</p>
+                          </div>
+                          <div>
+                            <h4 className="text-sm text-gray-400 mb-1">Rank</h4>
+                            <p className="font-medium">{selectedOrder.rank}</p>
+                          </div>
+                          <div>
+                            <h4 className="text-sm text-gray-400 mb-1">Price</h4>
+                            <p className="font-medium">${selectedOrder.price?.toFixed(2) || "0.00"}</p>
+                          </div>
+                          <div>
+                            <h4 className="text-sm text-gray-400 mb-1">Status</h4>
+                            <p className={`inline-block px-2 py-1 rounded-full text-xs font-medium ${
+                              selectedOrder.status === 'completed' ? 'bg-green-900/50 text-green-400' :
+                              selectedOrder.status === 'rejected' ? 'bg-red-900/50 text-red-400' :
+                              'bg-yellow-900/50 text-yellow-400'
+                            }`}>
+                              {selectedOrder.status}
+                            </p>
+                          </div>
+                          <div>
+                            <h4 className="text-sm text-gray-400 mb-1">Date</h4>
+                            <p className="font-medium text-sm">{new Date(selectedOrder.created_at).toLocaleString()}</p>
+                          </div>
+                        </div>
+                        
+                        <div className="mb-4">
+                          <h4 className="text-sm text-gray-400 mb-1">Payment Proof</h4>
+                          <div className="bg-gray-700 rounded-lg p-2 flex justify-center">
+                            {selectedOrder.payment_proof ? (
+                              <a 
+                                href={getPublicStorageUrl('payment-proofs', selectedOrder.payment_proof)} 
+                                target="_blank" 
+                                rel="noopener noreferrer"
+                                className="block"
+                              >
+                                <img 
+                                  src={getPublicStorageUrl('payment-proofs', selectedOrder.payment_proof)} 
+                                  alt="Payment proof" 
+                                  className="max-h-60 max-w-full object-contain rounded shadow-lg"
+                                  onError={(e) => {
+                                    e.currentTarget.src = 'https://placehold.co/400x400/gray/white?text=Image+Not+Available';
+                                  }}
+                                />
+                              </a>
+                            ) : (
+                              <div className="p-8 text-center text-gray-400">
+                                <Upload size={36} className="mx-auto mb-2 opacity-30" />
+                                <p>No payment proof available</p>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                        
+                        <div className="flex justify-end gap-2 border-t border-gray-700 pt-4">
+                          {selectedOrder.status !== 'completed' && (
+                            <button
+                              onClick={() => {
+                                updateOrderStatus(selectedOrder.id, 'completed');
+                                setOrderDetailsOpen(false);
+                              }}
+                              className="px-3 py-2 bg-green-600 hover:bg-green-700 rounded text-sm transition-colors inline-flex items-center"
+                            >
+                              <Check size={14} className="mr-1" />
+                              Mark as Completed
+                            </button>
+                          )}
+                          
+                          {selectedOrder.status !== 'rejected' && (
+                            <button
+                              onClick={() => {
+                                updateOrderStatus(selectedOrder.id, 'rejected');
+                                setOrderDetailsOpen(false);
+                              }}
+                              className="px-3 py-2 bg-red-600 hover:bg-red-700 rounded text-sm transition-colors inline-flex items-center"
+                            >
+                              <X size={14} className="mr-1" />
+                              Reject Order
+                            </button>
+                          )}
+                          
+                          <button
+                            onClick={() => setOrderDetailsOpen(false)}
+                            className="px-3 py-2 bg-gray-600 hover:bg-gray-500 rounded text-sm transition-colors"
+                          >
+                            Close
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
               
