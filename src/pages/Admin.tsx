@@ -5,7 +5,7 @@ import { Shield, DollarSign, Image, Save, Trash, RefreshCw, Plus, LogOut, Home, 
 import toast from 'react-hot-toast';
 import { useNavigate, Link } from 'react-router-dom';
 import { proxyImage } from '../lib/imageProxy';
-import './AdminStyles.css'; // Import the CSS for custom animations
+import '../styles/admin.css'; // Import from styles directory
 
 // Add the Order interface
 interface Order {
