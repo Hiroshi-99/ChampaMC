@@ -164,23 +164,58 @@ const fetchAndConvertToDataUrl = async (url: string | undefined): Promise<string
 
 // Add helper function to handle gradient styling
 const getGradientStyle = (rank: RankOption): string => {
-  // If rank has a custom gradient, use it
-  if (rank.custom_gradient) {
-    return rank.custom_gradient;
+  // For custom CSS gradients (likely from admin panel)
+  if (rank.gradientCss) {
+    // If it's already a full CSS class string with bg-gradient, return as is
+    if (rank.gradientCss.includes('bg-gradient')) {
+      return rank.gradientCss;
+    }
+    return `bg-gradient-to-r ${rank.gradientCss}`;
   }
   
-  // Use the preset gradient if available
+  // For custom gradient (custom CSS string)
+  if (rank.custom_gradient) {
+    // If it's already a full CSS class string, return as is
+    if (rank.custom_gradient.includes('bg-gradient')) {
+      return rank.custom_gradient;
+    }
+    return `bg-gradient-to-r ${rank.custom_gradient}`;
+  }
+  
+  // For gradient preset (named gradient)
   if (rank.gradient_preset) {
     return rank.gradient_preset;
   }
   
-  // Use gradientCss if available
-  if (rank.gradientCss) {
-    return rank.gradientCss;
+  // If we have start and end colors, create a gradient
+  if (rank.startColor && rank.endColor) {
+    return `bg-gradient-to-r from-[${rank.startColor}] to-[${rank.endColor}]`;
   }
   
-  // Fall back to the color property with default gradient direction
+  // Fall back to the color property
   return `bg-gradient-to-r ${rank.color || 'from-emerald-500 to-emerald-600'}`;
+};
+
+// Helper to apply inline gradient style if needed
+const getInlineGradientStyle = (rank: RankOption): React.CSSProperties | undefined => {
+  // Check if the gradient contains custom color values that need inline styles
+  if (rank.startColor && rank.startColor.startsWith('#') && 
+      rank.endColor && rank.endColor.startsWith('#')) {
+    return {
+      background: `linear-gradient(to right, ${rank.startColor}, ${rank.endColor})`
+    };
+  }
+  
+  // If custom_gradient looks like a CSS background value, not a class
+  if (rank.custom_gradient && (
+      rank.custom_gradient.includes('linear-gradient') || 
+      rank.custom_gradient.includes('radial-gradient'))) {
+    return {
+      background: rank.custom_gradient
+    };
+  }
+  
+  return undefined;
 };
 
 export function OrderModal({ isOpen, onClose }: OrderModalProps) {
@@ -824,6 +859,8 @@ export function OrderModal({ isOpen, onClose }: OrderModalProps) {
                   {ranks.map((rank) => {
                     const isActive = isDiscountActive(rank);
                     const gradientClass = getGradientStyle(rank);
+                    const inlineStyle = getInlineGradientStyle(rank);
+                    
                     return (
                       <button
                         key={rank.name}
@@ -831,9 +868,10 @@ export function OrderModal({ isOpen, onClose }: OrderModalProps) {
                         onClick={() => handleRankSelect(rank.name)}
                         className={`py-2 sm:py-3 px-2 sm:px-3 rounded-lg border transition-all transform hover:scale-[1.02] text-sm ${
                           selectedRank === rank.name
-                            ? gradientClass + ' text-white border-transparent'
+                            ? (inlineStyle ? '' : gradientClass) + ' text-white border-transparent'
                             : 'bg-gray-700/50 text-gray-300 border-gray-600 hover:bg-gray-600/50'
                         }`}
+                        style={selectedRank === rank.name ? inlineStyle : undefined}
                       >
                         <div className="font-medium truncate">{rank.name}</div>
                         <div className="flex justify-center items-center gap-1">
@@ -883,7 +921,10 @@ export function OrderModal({ isOpen, onClose }: OrderModalProps) {
                   
                   {/* Add badge with rank colors */}
                   <div className="mt-3 flex justify-center">
-                    <div className={`${getGradientStyle(selectedRankOption)} text-white text-xs font-bold rounded-full px-3 py-1`}>
+                    <div 
+                      className={`${getInlineGradientStyle(selectedRankOption) ? '' : getGradientStyle(selectedRankOption)} text-white text-xs font-bold rounded-full px-3 py-1`}
+                      style={getInlineGradientStyle(selectedRankOption)}
+                    >
                       {selectedRank} Rank Colors
                     </div>
                   </div>
