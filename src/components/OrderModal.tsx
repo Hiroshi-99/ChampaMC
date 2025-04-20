@@ -163,6 +163,7 @@ export function OrderModal({ isOpen, onClose }: OrderModalProps) {
   const [platform, setPlatform] = useState<'java' | 'bedrock'>('java');
   const [selectedRank, setSelectedRank] = useState<string>('VIP');
   const [paymentProof, setPaymentProof] = useState<File | null>(null);
+  const [paymentProofPreview, setPaymentProofPreview] = useState<string>('');
   const [loading, setLoading] = useState(false);
   const [demoMode, setDemoMode] = useState(false);
   const [ranks, setRanks] = useState<RankOption[]>([]);
@@ -342,7 +343,15 @@ export function OrderModal({ isOpen, onClose }: OrderModalProps) {
 
   const handleFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
-      setPaymentProof(e.target.files[0]);
+      const file = e.target.files[0];
+      setPaymentProof(file);
+      
+      // Convert to data URL instead of blob URL for CSP compliance
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setPaymentProofPreview(reader.result as string);
+      };
+      reader.readAsDataURL(file);
     }
   }, []);
 
@@ -949,7 +958,10 @@ export function OrderModal({ isOpen, onClose }: OrderModalProps) {
                       <h4 className="text-sm font-medium text-emerald-400">Preview</h4>
                       <button 
                         type="button" 
-                        onClick={() => setPaymentProof(null)}
+                        onClick={() => {
+                          setPaymentProof(null);
+                          setPaymentProofPreview('');
+                        }}
                         className="text-xs text-gray-400 hover:text-red-400"
                       >
                         Remove
@@ -957,7 +969,7 @@ export function OrderModal({ isOpen, onClose }: OrderModalProps) {
                     </div>
                     <div className="flex justify-center bg-gray-800 rounded-lg overflow-hidden">
                       <img 
-                        src={paymentProof ? URL.createObjectURL(paymentProof) : ''}
+                        src={paymentProofPreview}
                         alt="Payment proof preview" 
                         className="max-h-40 object-contain"
                       />
