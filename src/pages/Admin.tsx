@@ -114,7 +114,14 @@ const Admin = () => {
         .order('price', { ascending: true });
       
       if (error) throw error;
-      setRanks(data || []);
+      
+      // Add image field for component consistency
+      const ranksWithFormattedImages = data.map(rank => ({
+        ...rank,
+        image: rank.image_url // Add image field that points to image_url for component use
+      }));
+      
+      setRanks(ranksWithFormattedImages || []);
     } catch (error: any) {
       console.error('Error loading ranks:', error);
       toast.error('Failed to load ranks data');
@@ -479,11 +486,15 @@ const Admin = () => {
                       
                       <div className="p-4">
                         <div className="aspect-square mb-4 border border-gray-600 rounded-lg overflow-hidden bg-gray-800 flex items-center justify-center">
-                          {rank.image ? (
+                          {rank.image_url || rank.image ? (
                             <img 
-                              src={rank.image} 
+                              src={rank.image_url || rank.image} 
                               alt={rank.name} 
                               className="w-full h-full object-contain"
+                              onError={(e) => {
+                                e.currentTarget.src = 'https://i.imgur.com/placeholder.png';
+                                e.currentTarget.onerror = null; // Prevent infinite loop
+                              }}
                             />
                           ) : (
                             <div className="text-gray-500">No image</div>
@@ -513,12 +524,12 @@ const Admin = () => {
                             <input
                               type="text"
                               id={`image-url-${rank.id}`}
-                              value={rank.image || ''}
-                              onChange={(e) => handleRankChange(rank.id, 'image', e.target.value)}
+                              value={rank.image_url || rank.image || ''}
+                              onChange={(e) => handleRankChange(rank.id, 'image_url', e.target.value)}
                               className="flex-grow min-w-0 bg-gray-800 border border-gray-600 rounded-l-md p-2 text-sm"
                             />
                             <button
-                              onClick={() => handleUpdateRank(rank.id, { image: rank.image })}
+                              onClick={() => handleUpdateRank(rank.id, { image: rank.image_url || rank.image || '' })}
                               className="p-2 bg-blue-600 rounded-r-md hover:bg-blue-700 transition-colors"
                             >
                               <Save size={16} />

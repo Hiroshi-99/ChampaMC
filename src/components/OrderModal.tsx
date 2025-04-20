@@ -90,13 +90,13 @@ export function OrderModal({ isOpen, onClose }: OrderModalProps) {
         
         if (error) throw error;
         
-        // Transform data to match RankOption type
+        // Transform data to match RankOption type with proper image fallbacks
         const formattedRanks: RankOption[] = data.map(rank => ({
           id: rank.id,
           name: rank.name,
           price: rank.price,
           color: rank.color,
-          image: rank.image_url,
+          image: rank.image_url || `https://i.imgur.com/placeholder.png`, // Ensure fallback
           description: rank.description
         }));
         
@@ -529,6 +529,11 @@ export function OrderModal({ isOpen, onClose }: OrderModalProps) {
                       alt={`${selectedRank} Kit Preview`}
                       className="w-auto h-auto max-w-full max-h-[250px] object-contain rounded-lg border border-gray-600"
                       loading="lazy"
+                      onError={(e) => {
+                        // Fallback image if the main one fails to load
+                        e.currentTarget.src = 'https://i.imgur.com/placeholder.png';
+                        e.currentTarget.onerror = null; // Prevent infinite loop
+                      }}
                     />
                   </div>
                   {selectedRankOption.description && (

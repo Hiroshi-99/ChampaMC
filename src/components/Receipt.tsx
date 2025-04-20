@@ -148,6 +148,11 @@ export function Receipt({ isOpen, onClose, order, rankDetails }: ReceiptProps) {
                     alt={`${order.rank} Rank`}
                     className="w-full h-full object-contain"
                     loading="lazy"
+                    onError={(e) => {
+                      // Fallback to placeholder if image fails to load
+                      e.currentTarget.src = 'https://i.imgur.com/placeholder.png';
+                      e.currentTarget.onerror = null; // Prevent infinite loop
+                    }}
                   />
                 </div>
                 <div className="flex-1">
