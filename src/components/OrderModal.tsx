@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useCallback } from 'react';
+import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import { X, Upload, Info, CreditCard, User, Shield } from 'lucide-react';
 import { supabase, getPublicStorageUrl } from '../lib/supabase';
 import toast from 'react-hot-toast';
@@ -10,52 +10,6 @@ interface OrderModalProps {
   isOpen: boolean;
   onClose: () => void;
 }
-
-// Move RANKS outside component to avoid recreating on each render
-const RANKS: RankOption[] = [
-  { 
-    name: 'VIP', 
-    price: 5, 
-    color: 'from-emerald-500 to-emerald-600',
-    image: 'https://i.imgur.com/NX3RB4i.png'
-  },
-  { 
-    name: 'MVP', 
-    price: 10, 
-    color: 'from-blue-500 to-blue-600',
-    image: 'https://i.imgur.com/gmlFpV2.png'
-  },
-  { 
-    name: 'MVP+', 
-    price: 15, 
-    color: 'from-purple-500 to-purple-600',
-    image: 'https://i.imgur.com/C4VE5b0.png'
-  },
-  { 
-    name: 'LEGEND', 
-    price: 20, 
-    color: 'from-yellow-500 to-yellow-600',
-    image: 'https://i.imgur.com/fiqqcOY.png'
-  },
-  { 
-    name: 'DEVIL', 
-    price: 25, 
-    color: 'from-red-500 to-red-600',
-    image: 'https://i.imgur.com/z0zBiyZ.png'
-  },
-  { 
-    name: 'INFINITY', 
-    price: 30, 
-    color: 'from-pink-500 to-pink-600',
-    image: 'https://i.imgur.com/SW6dtYW.png'
-  },
-  { 
-    name: 'CHAMPA', 
-    price: 50, 
-    color: 'from-orange-500 to-orange-600',
-    image: 'https://i.imgur.com/5xEinAj.png'
-  }
-];
 
 // Helper function to parse Supabase error
 const parseSupabaseError = (error: any): string => {
@@ -110,29 +64,38 @@ const usernameRegex = /^[a-zA-Z0-9_]{3,16}$/;
 const MAX_FILE_SIZE = 5 * 1024 * 1024;
 
 export function OrderModal({ isOpen, onClose }: OrderModalProps) {
-  // State variables
-  const [username, setUsername] = useState('');
-  const [platform, setPlatform] = useState<'java' | 'bedrock'>('java');
-  const [selectedRank, setSelectedRank] = useState<string>('VIP');
-  const [paymentProof, setPaymentProof] = useState<File | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [demoMode, setDemoMode] = useState(false);
-  
-  // Receipt states
+  // Replace hardcoded RANKS with dynamic data
+  const [ranks, setRanks] = useState<RankOption[]>([]);
+  const [isLoadingRanks, setIsLoadingRanks] = useState(true);
+  // Form state
+  const [formData, setFormData] = useState({
+    username: '',
+    platform: 'java' as 'java' | 'bedrock', // Fixed type
+    rank: '' // Selected rank
+  });
+  const [selectedRank, setSelectedRank] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [isReceiptOpen, setIsReceiptOpen] = useState(false);
   const [completedOrder, setCompletedOrder] = useState<Order | null>(null);
+  const [paymentProofFile, setPaymentProofFile] = useState<File | null>(null);
+  const [paymentProofUrl, setPaymentProofUrl] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [demoMode, setDemoMode] = useState(false); // Added missing demoMode state
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const formRef = useRef<HTMLFormElement>(null);
 
   // Memoize selected rank to avoid recalculation on each render
-  const selectedRankOption = useMemo(() => 
-    RANKS.find(rank => rank.name === selectedRank), 
-    [selectedRank]
-  );
+  const selectedRankOption = useMemo(() => {
+    return selectedRank 
+      ? ranks.find(r => r.name === selectedRank)
+      : null;
+  }, [selectedRank, ranks]);
   
   // Memoize price to avoid recalculation
-  const selectedRankPrice = useMemo(() => 
-    selectedRankOption?.price || 0,
-    [selectedRankOption]
-  );
+  const selectedRankPrice = useMemo(() => {
+    if (!selectedRankOption) return 0;
+    return calculateRankPrice(selectedRankOption);
+  }, [selectedRankOption]);
 
   // Callbacks for event handlers
   const handleReceiptClose = useCallback(() => {
@@ -142,17 +105,88 @@ export function OrderModal({ isOpen, onClose }: OrderModalProps) {
 
   const handleFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
-      setPaymentProof(e.target.files[0]);
+      setPaymentProofFile(e.target.files[0]);
     }
   }, []);
 
   const handlePlatformChange = useCallback((newPlatform: 'java' | 'bedrock') => {
-    setPlatform(newPlatform);
+    setFormData(prev => ({ ...prev, platform: newPlatform }));
   }, []);
 
   const handleRankSelect = useCallback((rankName: string) => {
     setSelectedRank(rankName);
   }, []);
+
+  // Add useEffect to fetch ranks from database
+  useEffect(() => {
+    const fetchRanks = async () => {
+      try {
+        setIsLoadingRanks(true);
+        const { data, error } = await supabase
+          .from('ranks')
+          .select('*')
+          .order('price', { ascending: true });
+
+        if (error) throw error;
+        
+        // Transform data if needed to match RankOption interface
+        setRanks(data || []);
+      } catch (err) {
+        console.error('Error fetching ranks:', err);
+        // Fallback to default ranks
+        setRanks([
+          { 
+            name: 'VIP', 
+            price: 4.99, 
+            color: 'from-emerald-500 to-emerald-600',
+            image: 'https://i.imgur.com/NX3RB4i.png'
+          },
+          { 
+            name: 'MVP', 
+            price: 9.99, 
+            color: 'from-blue-500 to-blue-600',
+            image: 'https://i.imgur.com/gmlFpV2.png'
+          },
+          { 
+            name: 'MVP+', 
+            price: 15, 
+            color: 'from-purple-500 to-purple-600',
+            image: 'https://i.imgur.com/C4VE5b0.png'
+          },
+          { 
+            name: 'LEGEND', 
+            price: 20, 
+            color: 'from-yellow-500 to-yellow-600',
+            image: 'https://i.imgur.com/fiqqcOY.png'
+          },
+          { 
+            name: 'DEVIL', 
+            price: 25, 
+            color: 'from-red-500 to-red-600',
+            image: 'https://i.imgur.com/z0zBiyZ.png'
+          },
+          { 
+            name: 'INFINITY', 
+            price: 30, 
+            color: 'from-pink-500 to-pink-600',
+            image: 'https://i.imgur.com/SW6dtYW.png'
+          },
+          { 
+            name: 'CHAMPA', 
+            price: 50, 
+            color: 'from-orange-500 to-orange-600',
+            image: 'https://i.imgur.com/5xEinAj.png'
+          }
+        ]);
+      } finally {
+        setIsLoadingRanks(false);
+      }
+    };
+
+    if (isOpen) {
+      fetchRanks();
+    }
+  }, [isOpen]);
 
   // Early return if modal is not open
   if (!isOpen) return null;
@@ -175,29 +209,64 @@ export function OrderModal({ isOpen, onClose }: OrderModalProps) {
     }
   };
 
+  // Function to calculate rank price with discount
+  const calculateRankPrice = (rank: RankOption) => {
+    if (!rank) return 0;
+    
+    // Apply discount if available
+    if (rank.discount && rank.discount > 0) {
+      const discountAmount = (rank.price * rank.discount) / 100;
+      return rank.price - discountAmount;
+    }
+    
+    return rank.price;
+  };
+
+  // Get selected rank details
+  const selectedRankDetails = useMemo(() => {
+    return ranks.find(r => r.name === selectedRank) || null;
+  }, [ranks, selectedRank]);
+
+  // Format price display with discount if applicable
+  const renderRankPrice = (rank: RankOption | null) => {
+    if (!rank) return '$0.00';
+    
+    if (rank.discount && rank.discount > 0) {
+      const discountedPrice = calculateRankPrice(rank);
+      return (
+        <div className="flex items-center gap-1">
+          <span className="line-through text-gray-400 text-xs">${rank.price.toFixed(2)}</span>
+          <span className="text-emerald-400">${discountedPrice.toFixed(2)}</span>
+          <span className="ml-1 text-xs bg-emerald-500/20 text-emerald-300 px-1 py-0.5 rounded-sm">-{rank.discount}%</span>
+        </div>
+      );
+    }
+    return <span>${rank.price.toFixed(2)}</span>;
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setLoading(true);
+    setIsSubmitting(true);
 
     try {
       // Validate user inputs
-      if (!paymentProof) throw new Error('Please upload payment proof');
-      if (!username.trim()) throw new Error('Please enter your username');
+      if (!paymentProofFile) throw new Error('Please upload payment proof');
+      if (!formData.username.trim()) throw new Error('Please enter your username');
 
       // Validate username format
-      if (!usernameRegex.test(username.trim())) {
+      if (!usernameRegex.test(formData.username.trim())) {
         throw new Error('Username must be 3-16 characters long and contain only letters, numbers, and underscores');
       }
 
-      if (!selectedRankOption) throw new Error('Please select a valid rank');
+      if (!selectedRankDetails) throw new Error('Please select a valid rank');
 
       // Validate file type
-      if (!paymentProof.type.startsWith('image/')) {
+      if (!paymentProofFile.type.startsWith('image/')) {
         throw new Error('Please upload a valid image file');
       }
 
       // Validate file size
-      if (paymentProof.size > MAX_FILE_SIZE) {
+      if (paymentProofFile.size > MAX_FILE_SIZE) {
         throw new Error('Image size should be less than 5MB');
       }
 
@@ -214,10 +283,10 @@ export function OrderModal({ isOpen, onClose }: OrderModalProps) {
         // Upload file to Supabase storage
         const { error: uploadError, data } = await supabase.storage
           .from('payment-proofs')
-          .upload(filePath, paymentProof, {
+          .upload(filePath, paymentProofFile, {
             cacheControl: '3600',
             upsert: false,
-            contentType: paymentProof.type
+            contentType: paymentProofFile.type
           });
 
         if (uploadError) {
@@ -238,18 +307,21 @@ export function OrderModal({ isOpen, onClose }: OrderModalProps) {
         // In demo mode, continue with a placeholder URL
         if (!demoMode) throw uploadErr;
         
-        publicUrl = selectedRankOption.image; // Use rank image as a fallback
+        publicUrl = selectedRankDetails.image; // Use rank image as a fallback
         uploadData = { path: 'demo/payment-proof.jpg' };
         console.log('Using demo mode with placeholder image URL');
       }
 
+      // Get current rank price with any discount applied
+      const finalPrice = calculateRankPrice(selectedRankDetails);
+      
       // Create order with required fields
       const orderData: Order = {
         id: demoMode ? generateFakeOrderId() : undefined,
-        username: username.trim(),
-        platform,
+        username: formData.username.trim(),
+        platform: formData.platform,
         rank: selectedRank,
-        price: selectedRankOption.price,
+        price: finalPrice, // Use calculated price with discount
         payment_proof: uploadData.path,
         created_at: new Date().toISOString(),
         status: 'pending'
@@ -339,10 +411,9 @@ export function OrderModal({ isOpen, onClose }: OrderModalProps) {
         : 'Order submitted successfully! Your receipt is ready.');
       
       // Reset form
-      setUsername('');
-      setPlatform('java');
-      setSelectedRank('VIP');
-      setPaymentProof(null);
+      setFormData({ username: '', platform: 'java', rank: '' });
+      setSelectedRank('');
+      setPaymentProofFile(null);
       
       // Show the receipt
       setIsReceiptOpen(true);
@@ -368,7 +439,7 @@ export function OrderModal({ isOpen, onClose }: OrderModalProps) {
         toast.error(errorMessage);
       }
     } finally {
-      setLoading(false);
+      setIsSubmitting(false);
     }
   };
 
@@ -395,7 +466,7 @@ export function OrderModal({ isOpen, onClose }: OrderModalProps) {
           </div>
 
           {/* Order form */}
-          <form onSubmit={handleSubmit} className="space-y-4 sm:space-y-6">
+          <form onSubmit={handleSubmit} className="space-y-4 sm:space-y-6" ref={formRef}>
             {/* Order Summary */}
             <div className="bg-gray-700/50 rounded-lg p-3 sm:p-4 border border-gray-600">
               <h3 className="text-base sm:text-lg font-semibold text-white mb-3 sm:mb-4 flex items-center gap-2">
@@ -409,11 +480,11 @@ export function OrderModal({ isOpen, onClose }: OrderModalProps) {
                 </div>
                 <div className="flex justify-between text-gray-300">
                   <span>Platform:</span>
-                  <span className="font-medium capitalize">{platform}</span>
+                  <span className="font-medium capitalize">{formData.platform}</span>
                 </div>
                 <div className="flex justify-between text-gray-300">
                   <span>Price:</span>
-                  <span className="font-medium text-emerald-400">${selectedRankPrice}</span>
+                  <span className="font-medium text-emerald-400">{renderRankPrice(selectedRankDetails)}</span>
                 </div>
               </div>
             </div>
@@ -426,8 +497,8 @@ export function OrderModal({ isOpen, onClose }: OrderModalProps) {
               </label>
               <input
                 type="text"
-                value={username}
-                onChange={(e) => setUsername(e.target.value)}
+                value={formData.username}
+                onChange={(e) => setFormData(prev => ({ ...prev, username: e.target.value }))}
                 className="w-full bg-gray-700/50 border border-gray-600 rounded-lg py-2 px-3 text-white focus:outline-none focus:ring-2 focus:ring-emerald-400 text-sm sm:text-base"
                 required
                 placeholder="Enter your Minecraft username"
@@ -448,7 +519,7 @@ export function OrderModal({ isOpen, onClose }: OrderModalProps) {
                   type="button"
                   onClick={() => handlePlatformChange('java')}
                   className={`flex-1 py-2 px-3 sm:px-4 rounded-lg border transition-colors text-sm sm:text-base ${
-                    platform === 'java'
+                    formData.platform === 'java'
                       ? 'bg-emerald-500 text-white border-emerald-600'
                       : 'bg-gray-700/50 text-gray-300 border-gray-600 hover:bg-gray-600/50'
                   }`}
@@ -459,7 +530,7 @@ export function OrderModal({ isOpen, onClose }: OrderModalProps) {
                   type="button"
                   onClick={() => handlePlatformChange('bedrock')}
                   className={`flex-1 py-2 px-3 sm:px-4 rounded-lg border transition-colors text-sm sm:text-base ${
-                    platform === 'bedrock'
+                    formData.platform === 'bedrock'
                       ? 'bg-emerald-500 text-white border-emerald-600'
                       : 'bg-gray-700/50 text-gray-300 border-gray-600 hover:bg-gray-600/50'
                   }`}
@@ -475,7 +546,7 @@ export function OrderModal({ isOpen, onClose }: OrderModalProps) {
                 Select Rank
               </label>
               <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
-                {RANKS.map((rank) => (
+                {ranks.map((rank) => (
                   <button
                     key={rank.name}
                     type="button"
@@ -487,14 +558,14 @@ export function OrderModal({ isOpen, onClose }: OrderModalProps) {
                     }`}
                   >
                     <div className="font-medium truncate">{rank.name}</div>
-                    <div className="text-xs sm:text-sm">${rank.price}</div>
+                    <div className="text-xs sm:text-sm">{renderRankPrice(rank)}</div>
                   </button>
                 ))}
               </div>
             </div>
 
             {/* Rank Preview Section */}
-            {selectedRankOption && (
+            {selectedRankDetails && (
               <div className="bg-gray-700/50 rounded-lg p-3 sm:p-4 border border-gray-600">
                 <h3 className="text-base sm:text-lg font-semibold text-white mb-3 sm:mb-4 flex items-center gap-2">
                   <Shield size={18} className="text-emerald-400" />
@@ -502,7 +573,7 @@ export function OrderModal({ isOpen, onClose }: OrderModalProps) {
                 </h3>
                 <div className="flex justify-center">
                   <img 
-                    src={selectedRankOption.image} 
+                    src={selectedRankDetails.image} 
                     alt={`${selectedRank} Kit Preview`}
                     className="w-auto h-auto max-w-full max-h-[250px] object-contain rounded-lg border border-gray-600"
                     loading="lazy"
@@ -527,7 +598,7 @@ export function OrderModal({ isOpen, onClose }: OrderModalProps) {
                     loading="lazy"
                   />
                 </div>
-                <p className="text-xs sm:text-sm text-gray-400 mt-2">Amount: ${selectedRankPrice}</p>
+                <p className="text-xs sm:text-sm text-gray-400 mt-2">Amount: {renderRankPrice(selectedRankDetails)}</p>
               </div>
             </div>
 
@@ -544,14 +615,15 @@ export function OrderModal({ isOpen, onClose }: OrderModalProps) {
                   className="hidden"
                   id="payment-proof"
                   required
+                  ref={fileInputRef}
                 />
                 <label
                   htmlFor="payment-proof"
                   className="w-full bg-gray-700/50 border border-gray-600 rounded-lg py-2 sm:py-3 px-3 sm:px-4 text-white flex items-center justify-center gap-2 cursor-pointer hover:bg-gray-600/50 transition duration-300 text-sm sm:text-base"
                 >
                   <Upload size={18} />
-                  {paymentProof ? (
-                    <span className="truncate max-w-full">{paymentProof.name}</span>
+                  {paymentProofFile ? (
+                    <span className="truncate max-w-full">{paymentProofFile.name}</span>
                   ) : (
                     'Upload QR Code Screenshot'
                   )}
@@ -562,23 +634,23 @@ export function OrderModal({ isOpen, onClose }: OrderModalProps) {
             {/* Submit Button */}
             <button
               type="submit"
-              disabled={loading}
+              disabled={isSubmitting}
               className="w-full bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-600 hover:to-emerald-700 text-white rounded-lg py-3 px-4 transition duration-300 disabled:opacity-50 transform hover:scale-[1.02] text-sm sm:text-base font-medium mt-2"
-              aria-busy={loading}
+              aria-busy={isSubmitting}
             >
-              {loading ? 'Processing...' : 'Submit Order'}
+              {isSubmitting ? 'Processing...' : 'Submit Order'}
             </button>
           </form>
         </div>
       </div>
 
       {/* Receipt Display */}
-      {completedOrder && selectedRankOption && (
+      {completedOrder && selectedRankDetails && (
         <Receipt 
           isOpen={isReceiptOpen} 
           onClose={handleReceiptClose} 
           order={completedOrder}
-          rankDetails={selectedRankOption}
+          rankDetails={selectedRankDetails}
         />
       )}
     </>

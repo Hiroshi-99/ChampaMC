@@ -4,6 +4,8 @@ import { Toaster } from 'react-hot-toast';
 
 // Lazy load the Store component for better initial load performance
 const Store = lazy(() => import('./pages/Store'));
+// Lazy load the Admin component
+const Admin = lazy(() => import('./pages/Admin'));
 
 // Simple loading component
 const LoadingFallback = () => (
@@ -129,6 +131,7 @@ function App() {
           <Suspense fallback={<LoadingFallback />}>
             <Routes>
               <Route path="/" element={<Store />} />
+              <Route path="/admin" element={<Admin />} />
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
           </Suspense>

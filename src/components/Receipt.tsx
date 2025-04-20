@@ -133,8 +133,17 @@ export function Receipt({ isOpen, onClose, order, rankDetails }: ReceiptProps) {
               <div className="bg-gray-50 p-3 rounded-lg">
                 <div className="flex justify-between mb-2">
                   <span className="text-gray-600">{order.rank} Rank</span>
-                  <span>${order.price.toFixed(2)}</span>
+                  <span>${rankDetails.price.toFixed(2)}</span>
                 </div>
+                
+                {/* Display discount if applicable */}
+                {rankDetails.discount && rankDetails.discount > 0 && (
+                  <div className="flex justify-between mb-2 text-green-600">
+                    <span>Discount ({rankDetails.discount}%)</span>
+                    <span>-${((rankDetails.price * rankDetails.discount) / 100).toFixed(2)}</span>
+                  </div>
+                )}
+                
                 <div className="font-bold flex justify-between text-lg pt-2 border-t">
                   <span>Total</span>
                   <span className="text-emerald-600">${order.price.toFixed(2)}</span>

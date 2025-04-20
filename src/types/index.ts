@@ -16,6 +16,8 @@ export interface RankOption {
   price: number;
   color: string;
   image: string;
+  description?: string;
+  discount?: number;
 }
 
 // Discord webhook types
