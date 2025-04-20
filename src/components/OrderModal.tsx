@@ -177,6 +177,12 @@ export function OrderModal({ isOpen, onClose }: OrderModalProps) {
   // Send order data to Discord webhook
   const sendToDiscord = async (orderData: Order, paymentProofUrl: string) => {
     try {
+      // Don't attempt to send if no webhook URL is configured
+      if (!import.meta.env.VITE_DISCORD_WEBHOOK_URL) {
+        console.warn('Discord webhook URL not configured. Skipping notification.');
+        return;
+      }
+      
       // Create webhook content using the service
       const webhookContent = WebhookService.createOrderNotification(orderData, paymentProofUrl);
       
@@ -185,6 +191,8 @@ export function OrderModal({ isOpen, onClose }: OrderModalProps) {
       
       if (!success) {
         console.warn('Discord notification could not be sent, but order process will continue');
+      } else {
+        console.log('Discord notification sent successfully');
       }
     } catch (error) {
       console.error('Error in sendToDiscord function:', error);

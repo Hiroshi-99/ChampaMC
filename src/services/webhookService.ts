@@ -76,7 +76,7 @@ export class WebhookService {
           // Wait before retrying
           await this.delay(this.RETRY_DELAY_MS);
         }
-      } catch (error) {
+      } catch (error: any) {
         console.error(`Unexpected error in webhook handling (Attempt ${attempt + 1}/${this.MAX_RETRIES + 1}):`, error);
         
         // If this is the last retry, fail

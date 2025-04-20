@@ -210,34 +210,16 @@ const Admin = () => {
     ));
   };
 
-  // Handle image upload
-  const handleImageUpload = async (id: string, file: File) => {
-    if (!file) return;
+  // Handle image URL update
+  const handleImageUrlUpdate = async (id: string, imageUrl: string) => {
+    if (!imageUrl) return;
     
     try {
-      // Upload to storage
-      const fileExt = file.name.split('.').pop();
-      const fileName = `${id}.${fileExt}`;
-      const filePath = `ranks/${fileName}`;
-      
-      const { error: uploadError } = await supabase.storage
-        .from('ranks')
-        .upload(filePath, file, { upsert: true });
-      
-      if (uploadError) throw uploadError;
-      
-      // Get public URL
-      const { data } = supabase.storage
-        .from('ranks')
-        .getPublicUrl(filePath);
-      
-      if (data) {
-        // Update rank with new image URL - convert to image_url field
-        await handleUpdateRank(id, { image: data.publicUrl });
-      }
+      await handleUpdateRank(id, { image: imageUrl });
+      toast.success('Image URL updated successfully');
     } catch (error: any) {
-      console.error('Error uploading image:', error);
-      toast.error('Failed to upload image');
+      console.error('Error updating image URL:', error);
+      toast.error('Failed to update image URL');
     }
   };
 
@@ -501,21 +483,6 @@ const Admin = () => {
                           )}
                         </div>
                         
-                        <label className="block">
-                          <span className="sr-only">Choose image</span>
-                          <input 
-                            type="file" 
-                            accept="image/*"
-                            onChange={(e) => e.target.files && handleImageUpload(rank.id, e.target.files[0])}
-                            className="block w-full text-sm text-gray-400
-                              file:mr-4 file:py-2 file:px-4
-                              file:rounded file:border-0
-                              file:text-sm file:font-semibold
-                              file:bg-emerald-600 file:text-white
-                              hover:file:bg-emerald-700"
-                          />
-                        </label>
-                        
                         <div className="mt-4">
                           <label htmlFor={`image-url-${rank.id}`} className="block text-sm font-medium text-gray-400">
                             Image URL
@@ -526,15 +493,19 @@ const Admin = () => {
                               id={`image-url-${rank.id}`}
                               value={rank.image_url || rank.image || ''}
                               onChange={(e) => handleRankChange(rank.id, 'image_url', e.target.value)}
+                              placeholder="Enter image URL (e.g., https://i.imgur.com/example.png)"
                               className="flex-grow min-w-0 bg-gray-800 border border-gray-600 rounded-l-md p-2 text-sm"
                             />
                             <button
-                              onClick={() => handleUpdateRank(rank.id, { image: rank.image_url || rank.image || '' })}
+                              onClick={() => handleImageUrlUpdate(rank.id, rank.image_url || rank.image || '')}
                               className="p-2 bg-blue-600 rounded-r-md hover:bg-blue-700 transition-colors"
                             >
                               <Save size={16} />
                             </button>
                           </div>
+                          <p className="mt-1 text-xs text-gray-400">
+                            Use direct links to images (e.g., Imgur URLs)
+                          </p>
                         </div>
                       </div>
                     </div>

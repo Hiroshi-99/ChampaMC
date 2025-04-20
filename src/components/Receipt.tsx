@@ -1,6 +1,7 @@
 import React, { useRef, useCallback, useMemo } from 'react';
 import { Download, X, Check, Info, User, Calendar, CreditCard, Shield, Printer } from 'lucide-react';
 import { Order, RankOption } from '../types';
+import { getPublicStorageUrl } from '../lib/supabase';
 
 interface ReceiptProps {
   isOpen: boolean;
@@ -30,11 +31,18 @@ export function Receipt({ isOpen, onClose, order, rankDetails }: ReceiptProps) {
     [order.id, order.created_at]
   );
 
-  // Generate a verification URL with the order number
-  const verificationUrl = useMemo(() => 
-    `https://champamc.store/verify/${orderNumber}`,
-    [orderNumber]
-  );
+  // Get payment proof URL
+  const paymentProofUrl = useMemo(() => {
+    if (!order.payment_proof) return null;
+    
+    // Check if it's already a full URL
+    if (order.payment_proof.startsWith('http')) {
+      return order.payment_proof;
+    }
+    
+    // Otherwise, construct URL from Supabase storage
+    return getPublicStorageUrl('payment-proofs', order.payment_proof);
+  }, [order.payment_proof]);
 
   // Handle printing the receipt
   const handlePrint = useCallback(() => {
@@ -182,19 +190,29 @@ export function Receipt({ isOpen, onClose, order, rankDetails }: ReceiptProps) {
               </div>
             </div>
 
-            {/* Verification QR Code */}
-            <div className="text-center">
-              <h4 className="font-semibold text-sm mb-2">Order Verification</h4>
-              <div className="bg-gray-100 inline-block p-2 rounded-lg">
-                <img 
-                  src={`https://api.qrserver.com/v1/create-qr-code/?size=80x80&data=${encodeURIComponent(verificationUrl)}`} 
-                  alt="Verification QR Code" 
-                  className="w-20 h-20 mx-auto"
-                  loading="lazy"
-                />
+            {/* Payment Proof */}
+            {paymentProofUrl && (
+              <div className="border-b pb-4">
+                <h4 className="font-semibold text-lg mb-3 flex items-center gap-2">
+                  <CreditCard size={18} className="text-emerald-600" aria-hidden="true" />
+                  Payment Proof
+                </h4>
+                <div className="flex justify-center">
+                  <div className="bg-gray-100 border border-gray-200 rounded-lg p-2 max-w-xs">
+                    <img 
+                      src={paymentProofUrl} 
+                      alt="Payment Proof" 
+                      className="max-h-36 w-auto object-contain mx-auto"
+                      loading="lazy"
+                      onError={(e) => {
+                        e.currentTarget.src = 'https://i.imgur.com/placeholder.png';
+                        e.currentTarget.onerror = null;
+                      }}
+                    />
+                  </div>
+                </div>
               </div>
-              <p className="text-xs text-gray-500 mt-1">Scan to verify order</p>
-            </div>
+            )}
 
             {/* Terms and Conditions */}
             <div className="text-xs text-gray-500 mt-4 pt-4 border-t">
