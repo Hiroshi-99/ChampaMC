@@ -1,57 +1,12 @@
-import React, { useState, useEffect } from 'react';
-import { ShoppingCart, Check, UserCircle } from 'lucide-react';
+import React, { useState } from 'react';
+import { ShoppingCart, Check } from 'lucide-react';
 import { OrderModal } from '../components/OrderModal';
-import { supabase } from '../lib/supabase';
-import { useNavigate } from 'react-router-dom';
 
 function Store() {
   const [isOrderModalOpen, setIsOrderModalOpen] = useState(false);
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [isAdmin, setIsAdmin] = useState(false);
-  const navigate = useNavigate();
   
   // Single banner GIF instead of multiple slide images
   const bannerGif = "/images/banner.gif";
-
-  // Check if user is authenticated and is an admin
-  useEffect(() => {
-    const checkAuth = async () => {
-      const { data: { user } } = await supabase.auth.getUser();
-      setIsAuthenticated(!!user);
-      
-      if (user) {
-        // Check if user is in admins table
-        const { data } = await supabase
-          .from('admins')
-          .select('*')
-          .eq('user_id', user.id)
-          .maybeSingle();
-          
-        setIsAdmin(!!data);
-      }
-    };
-    
-    checkAuth();
-    
-    // Subscribe to auth changes
-    const { data: authListener } = supabase.auth.onAuthStateChange((event) => {
-      if (event === 'SIGNED_IN') {
-        checkAuth();
-      } else if (event === 'SIGNED_OUT') {
-        setIsAuthenticated(false);
-        setIsAdmin(false);
-      }
-    });
-    
-    return () => {
-      authListener?.subscription.unsubscribe();
-    };
-  }, []);
-
-  // Handle navigation to admin page
-  const handleAdminClick = () => {
-    navigate('/admin');
-  };
 
   return (
     <div className="min-h-screen relative">
@@ -87,15 +42,6 @@ function Store() {
             />
             <h1 className="text-white text-xl sm:text-2xl font-bold tracking-wider">CHAMPA STORE</h1>
           </div>
-          {isAuthenticated && isAdmin && (
-            <button
-              onClick={handleAdminClick}
-              className="flex items-center gap-1 px-3 py-1.5 bg-emerald-600 text-white rounded-md hover:bg-emerald-700 transition duration-200 text-sm"
-            >
-              <UserCircle size={16} />
-              <span>Admin Panel</span>
-            </button>
-          )}
         </header>
 
         {/* Banner - Single GIF */}

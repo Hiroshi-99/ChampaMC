@@ -12,12 +12,15 @@ export interface Order {
 
 // Rank option type
 export interface RankOption {
+  id?: string;
   name: string;
   price: number;
   color: string;
   image: string;
+  image_url?: string;
   description?: string;
-  discount?: number;
+  created_at?: string;
+  updated_at?: string;
 }
 
 // Discord webhook types

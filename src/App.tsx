@@ -2,9 +2,8 @@ import React, { useState, useEffect, Suspense, lazy } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast';
 
-// Lazy load the Store component for better initial load performance
+// Lazy load components for better initial load performance
 const Store = lazy(() => import('./pages/Store'));
-// Lazy load the Admin component
 const Admin = lazy(() => import('./pages/Admin'));
 
 // Simple loading component

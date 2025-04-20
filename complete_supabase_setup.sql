@@ -130,6 +130,22 @@ CREATE POLICY "Allow authenticated users to manage payment proofs" ON storage.ob
     FOR ALL TO authenticated
     USING (bucket_id = 'payment-proofs');
 
+-- Create the storage bucket for ranks
+INSERT INTO storage.buckets (id, name, public) VALUES 
+    ('ranks', 'ranks', true)
+ON CONFLICT (id) DO NOTHING;
+
+-- Create a policy to allow authenticated users to manage rank images
+CREATE POLICY "Allow authenticated users to manage rank images" ON storage.objects
+    FOR ALL TO authenticated
+    USING (bucket_id = 'ranks')
+    WITH CHECK (bucket_id = 'ranks');
+
+-- Create a policy to allow public to view rank images
+CREATE POLICY "Allow public to view rank images" ON storage.objects
+    FOR SELECT TO anon
+    USING (bucket_id = 'ranks');
+
 -------------------------------
 -- Create helper functions
 -------------------------------

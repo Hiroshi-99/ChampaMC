@@ -1,5 +1,5 @@
 import React, { useRef, useCallback, useMemo } from 'react';
-import { Download, X, Check, Info, User, Calendar, CreditCard } from 'lucide-react';
+import { Download, X, Check, Info, User, Calendar, CreditCard, Shield, Printer } from 'lucide-react';
 import { Order, RankOption } from '../types';
 
 interface ReceiptProps {
@@ -30,14 +30,14 @@ export function Receipt({ isOpen, onClose, order, rankDetails }: ReceiptProps) {
     [order.id, order.created_at]
   );
 
+  // Generate a verification URL with the order number
+  const verificationUrl = useMemo(() => 
+    `https://champamc.store/verify/${orderNumber}`,
+    [orderNumber]
+  );
+
   // Handle printing the receipt
   const handlePrint = useCallback(() => {
-    // Use window.print for printing
-    window.print();
-  }, []);
-
-  // Handle download as PDF
-  const handleDownload = useCallback(() => {
     window.print();
   }, []);
 
@@ -63,7 +63,7 @@ export function Receipt({ isOpen, onClose, order, rankDetails }: ReceiptProps) {
           </div>
           <h2 className="text-2xl sm:text-3xl font-bold text-white mb-2">Order Confirmed!</h2>
           <p className="text-gray-400 text-sm sm:text-base">
-            Thank you for your purchase. Your order has been received.
+            Thank you for your purchase. Your order has been received and is being processed.
           </p>
         </div>
 
@@ -73,7 +73,7 @@ export function Receipt({ isOpen, onClose, order, rankDetails }: ReceiptProps) {
           className="bg-white rounded-xl overflow-hidden text-gray-800 receipt-content shadow-lg"
         >
           {/* Receipt Header */}
-          <div className="bg-emerald-500 p-4 text-white">
+          <div className={`bg-gradient-to-r ${rankDetails.color || 'from-emerald-500 to-emerald-600'} p-4 text-white`}>
             <div className="flex justify-between items-center">
               <div className="flex items-center gap-2">
                 <img 
@@ -85,7 +85,7 @@ export function Receipt({ isOpen, onClose, order, rankDetails }: ReceiptProps) {
                 <h3 className="text-xl font-bold">Champa Store</h3>
               </div>
               <div className="text-sm">
-                <div>Receipt #{orderNumber}</div>
+                <div>Receipt #{orderNumber.slice(0, 12)}</div>
                 <div>{formattedDate}</div>
               </div>
             </div>
@@ -93,13 +93,22 @@ export function Receipt({ isOpen, onClose, order, rankDetails }: ReceiptProps) {
 
           {/* Receipt Content */}
           <div className="p-5 space-y-4 text-gray-700">
+            {/* Status Banner */}
+            <div className={`bg-yellow-50 border border-yellow-200 text-yellow-800 px-4 py-2 rounded-lg flex items-center justify-between`}>
+              <div className="flex items-center gap-2">
+                <Info size={18} className="text-yellow-600" />
+                <span>Order Status: <span className="font-semibold uppercase">{order.status}</span></span>
+              </div>
+              <span className="text-xs text-yellow-600">Est. delivery: 24 hours</span>
+            </div>
+            
             {/* Order Details */}
             <div className="border-b pb-4">
-              <h4 className="font-semibold text-lg mb-2 flex items-center gap-2">
+              <h4 className="font-semibold text-lg mb-3 flex items-center gap-2">
                 <Info size={18} className="text-emerald-600" aria-hidden="true" />
                 Order Details
               </h4>
-              <div className="grid grid-cols-2 gap-2 text-sm">
+              <div className="grid grid-cols-2 gap-3 text-sm">
                 <div className="flex items-center gap-2">
                   <User size={14} className="text-emerald-600" aria-hidden="true" />
                   <span className="font-medium">Username:</span>
@@ -112,9 +121,10 @@ export function Receipt({ isOpen, onClose, order, rankDetails }: ReceiptProps) {
                 <div className="capitalize">{order.platform}</div>
                 
                 <div className="flex items-center gap-2">
+                  <Shield size={14} className="text-emerald-600" aria-hidden="true" />
                   <span className="font-medium">Rank:</span>
                 </div>
-                <div>{order.rank}</div>
+                <div className="font-semibold">{order.rank}</div>
                 
                 <div className="flex items-center gap-2">
                   <Calendar size={14} className="text-emerald-600" aria-hidden="true" />
@@ -124,26 +134,42 @@ export function Receipt({ isOpen, onClose, order, rankDetails }: ReceiptProps) {
               </div>
             </div>
 
+            {/* Rank Details with Preview */}
+            <div className="border-b pb-4">
+              <h4 className="font-semibold text-lg mb-3 flex items-center gap-2">
+                <Shield size={18} className="text-emerald-600" aria-hidden="true" />
+                Rank Information
+              </h4>
+              
+              <div className="flex gap-4 items-center">
+                <div className="w-20 h-20 overflow-hidden rounded-lg border border-gray-200 flex-shrink-0">
+                  <img 
+                    src={rankDetails.image} 
+                    alt={`${order.rank} Rank`}
+                    className="w-full h-full object-contain"
+                    loading="lazy"
+                  />
+                </div>
+                <div className="flex-1">
+                  <h5 className="font-bold text-gray-800 text-lg">{rankDetails.name}</h5>
+                  {rankDetails.description && (
+                    <p className="text-sm text-gray-600 mt-1">{rankDetails.description}</p>
+                  )}
+                </div>
+              </div>
+            </div>
+
             {/* Payment Summary */}
-            <div>
-              <h4 className="font-semibold text-lg mb-2 flex items-center gap-2">
+            <div className="border-b pb-4">
+              <h4 className="font-semibold text-lg mb-3 flex items-center gap-2">
                 <CreditCard size={18} className="text-emerald-600" aria-hidden="true" />
                 Payment Summary
               </h4>
               <div className="bg-gray-50 p-3 rounded-lg">
                 <div className="flex justify-between mb-2">
                   <span className="text-gray-600">{order.rank} Rank</span>
-                  <span>${rankDetails.price.toFixed(2)}</span>
+                  <span>${order.price.toFixed(2)}</span>
                 </div>
-                
-                {/* Display discount if applicable */}
-                {rankDetails.discount && rankDetails.discount > 0 && (
-                  <div className="flex justify-between mb-2 text-green-600">
-                    <span>Discount ({rankDetails.discount}%)</span>
-                    <span>-${((rankDetails.price * rankDetails.discount) / 100).toFixed(2)}</span>
-                  </div>
-                )}
-                
                 <div className="font-bold flex justify-between text-lg pt-2 border-t">
                   <span>Total</span>
                   <span className="text-emerald-600">${order.price.toFixed(2)}</span>
@@ -151,16 +177,18 @@ export function Receipt({ isOpen, onClose, order, rankDetails }: ReceiptProps) {
               </div>
             </div>
 
-            {/* Rank Preview */}
-            <div className="flex items-center justify-center py-3">
-              <div className="w-24 h-24 overflow-hidden rounded-lg">
+            {/* Verification QR Code */}
+            <div className="text-center">
+              <h4 className="font-semibold text-sm mb-2">Order Verification</h4>
+              <div className="bg-gray-100 inline-block p-2 rounded-lg">
                 <img 
-                  src={rankDetails.image} 
-                  alt={`${order.rank} Rank`}
-                  className="w-full h-full object-contain"
+                  src={`https://api.qrserver.com/v1/create-qr-code/?size=80x80&data=${encodeURIComponent(verificationUrl)}`} 
+                  alt="Verification QR Code" 
+                  className="w-20 h-20 mx-auto"
                   loading="lazy"
                 />
               </div>
+              <p className="text-xs text-gray-500 mt-1">Scan to verify order</p>
             </div>
 
             {/* Terms and Conditions */}
@@ -172,7 +200,7 @@ export function Receipt({ isOpen, onClose, order, rankDetails }: ReceiptProps) {
               <p>
                 For any issues or support, please contact us on our Discord server.
               </p>
-              <div className="flex items-center justify-center mt-2">
+              <div className="flex items-center justify-center mt-3">
                 <div className="text-center">
                   <p className="font-semibold text-emerald-600">Thank You For Your Purchase!</p>
                   <p>Champa Store</p>
@@ -183,13 +211,13 @@ export function Receipt({ isOpen, onClose, order, rankDetails }: ReceiptProps) {
         </div>
 
         {/* Action Buttons */}
-        <div className="mt-6 flex gap-2 no-print">
+        <div className="mt-6 flex gap-3 no-print">
           <button
             onClick={handlePrint}
             className="flex-1 bg-white hover:bg-gray-100 text-gray-800 rounded-lg py-2.5 px-4 flex items-center justify-center gap-2 transition-colors text-sm sm:text-base"
             aria-label="Print receipt"
           >
-            <Download size={18} aria-hidden="true" />
+            <Printer size={18} aria-hidden="true" />
             Print Receipt
           </button>
           <button

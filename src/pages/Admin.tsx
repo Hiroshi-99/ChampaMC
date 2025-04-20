@@ -1,159 +1,534 @@
 import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { Loader2 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
-import { RankOption, Order } from '../types';
-import { RankManager, OrderManager, ImageManager } from '../components/admin';
+import { RankOption } from '../types';
+import { Shield, DollarSign, Image, Save, Trash, RefreshCw, Plus, LogOut, Home, Lock } from 'lucide-react';
+import toast from 'react-hot-toast';
+import { useNavigate, Link } from 'react-router-dom';
 
-// Admin dashboard tabs
-type AdminTab = 'ranks' | 'orders' | 'images';
-
-export default function Admin() {
-  const [isLoading, setIsLoading] = useState(true);
-  const [isAdmin, setIsAdmin] = useState(false);
-  const [activeTab, setActiveTab] = useState<AdminTab>('ranks');
+const Admin = () => {
   const navigate = useNavigate();
+  const [ranks, setRanks] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [activeTab, setActiveTab] = useState('ranks');
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [isAuthLoading, setIsAuthLoading] = useState(true);
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [loginLoading, setLoginLoading] = useState(false);
 
-  // Check if the current user is an admin
+  // Check authentication status on component mount
   useEffect(() => {
-    const checkAdminStatus = async () => {
-      try {
-        const { data: { user } } = await supabase.auth.getUser();
-        
-        if (!user) {
-          navigate('/');
-          return;
-        }
+    checkAuth();
+  }, []);
 
-        // Check if user is in admins table
-        const { data: adminData, error } = await supabase
+  // Check if user is authenticated and an admin
+  const checkAuth = async () => {
+    setIsAuthLoading(true);
+    try {
+      // Get current session
+      const { data: { session } } = await supabase.auth.getSession();
+      
+      if (session) {
+        setIsAuthenticated(true);
+        
+        // Check if user is an admin
+        const { data: adminData, error: adminError } = await supabase
           .from('admins')
           .select('*')
-          .eq('user_id', user.id)
+          .eq('user_id', session.user.id)
           .single();
-
-        if (error || !adminData) {
+        
+        if (adminData && !adminError) {
+          setIsAdmin(true);
+          loadRanks(); // Load ranks if user is an admin
+        } else {
+          toast.error('You do not have admin privileges');
           navigate('/');
-          return;
         }
-
-        setIsAdmin(true);
-      } catch (error) {
-        console.error('Error checking admin status:', error);
-        navigate('/');
-      } finally {
-        setIsLoading(false);
       }
+    } catch (error) {
+      console.error('Auth check failed:', error);
+    } finally {
+      setIsAuthLoading(false);
+    }
+  };
+
+  // Handle login
+  const handleLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoginLoading(true);
+    try {
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email,
+        password
+      });
+      
+      if (error) throw error;
+      
+      // Check if the user is an admin
+      if (data.user) {
+        const { data: adminData, error: adminError } = await supabase
+          .from('admins')
+          .select('*')
+          .eq('user_id', data.user.id)
+          .single();
+        
+        if (adminData && !adminError) {
+          toast.success('Logged in successfully');
+          setIsAuthenticated(true);
+          setIsAdmin(true);
+          loadRanks(); // Load ranks after successful login
+        } else {
+          toast.error('You do not have admin privileges');
+          await supabase.auth.signOut();
+        }
+      }
+    } catch (error: any) {
+      console.error('Login failed:', error);
+      toast.error(error.message || 'Login failed');
+    } finally {
+      setLoginLoading(false);
+    }
+  };
+
+  // Handle logout
+  const handleLogout = async () => {
+    try {
+      await supabase.auth.signOut();
+      setIsAuthenticated(false);
+      setIsAdmin(false);
+    } catch (error) {
+      console.error('Logout failed:', error);
+    }
+  };
+
+  // Function to load ranks from database
+  const loadRanks = async () => {
+    setLoading(true);
+    try {
+      const { data, error } = await supabase
+        .from('ranks')
+        .select('*')
+        .order('price', { ascending: true });
+      
+      if (error) throw error;
+      setRanks(data || []);
+    } catch (error: any) {
+      console.error('Error loading ranks:', error);
+      toast.error('Failed to load ranks data');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Handle updating a rank
+  const handleUpdateRank = async (id: string, updates: Partial<RankOption>) => {
+    setSaving(true);
+    try {
+      const { error } = await supabase
+        .from('ranks')
+        .update(updates)
+        .eq('id', id);
+      
+      if (error) throw error;
+      toast.success('Rank updated successfully');
+      await loadRanks(); // Reload data
+    } catch (error: any) {
+      console.error('Error updating rank:', error);
+      toast.error('Failed to update rank');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // Handle adding a new rank
+  const handleAddRank = async () => {
+    const newRank = {
+      name: 'NEW RANK',
+      price: 5.00,
+      color: 'from-gray-500 to-gray-600',
+      image: 'https://i.imgur.com/placeholder.png',
+      description: 'New rank description'
     };
 
-    checkAdminStatus();
-  }, [navigate]);
+    setSaving(true);
+    try {
+      const { error } = await supabase
+        .from('ranks')
+        .insert([newRank]);
+      
+      if (error) throw error;
+      toast.success('Rank added successfully');
+      await loadRanks(); // Reload data
+    } catch (error: any) {
+      console.error('Error adding rank:', error);
+      toast.error('Failed to add rank');
+    } finally {
+      setSaving(false);
+    }
+  };
 
-  // Render loading state
-  if (isLoading) {
+  // Handle deleting a rank
+  const handleDeleteRank = async (id: string) => {
+    if (!confirm('Are you sure you want to delete this rank?')) return;
+    
+    try {
+      const { error } = await supabase
+        .from('ranks')
+        .delete()
+        .eq('id', id);
+      
+      if (error) throw error;
+      toast.success('Rank deleted successfully');
+      await loadRanks(); // Reload data
+    } catch (error: any) {
+      console.error('Error deleting rank:', error);
+      toast.error('Failed to delete rank');
+    }
+  };
+
+  // Handle input change for a rank field
+  const handleRankChange = (id: string, field: string, value: any) => {
+    setRanks(ranks.map(rank => 
+      rank.id === id ? { ...rank, [field]: value } : rank
+    ));
+  };
+
+  // Handle image upload
+  const handleImageUpload = async (id: string, file: File) => {
+    if (!file) return;
+    
+    try {
+      // Upload to storage
+      const fileExt = file.name.split('.').pop();
+      const fileName = `${id}.${fileExt}`;
+      const filePath = `ranks/${fileName}`;
+      
+      const { error: uploadError } = await supabase.storage
+        .from('ranks')
+        .upload(filePath, file, { upsert: true });
+      
+      if (uploadError) throw uploadError;
+      
+      // Get public URL
+      const { data } = supabase.storage
+        .from('ranks')
+        .getPublicUrl(filePath);
+      
+      if (data) {
+        // Update rank with new image URL
+        await handleUpdateRank(id, { image: data.publicUrl });
+      }
+    } catch (error: any) {
+      console.error('Error uploading image:', error);
+      toast.error('Failed to upload image');
+    }
+  };
+
+  if (isAuthLoading) {
     return (
       <div className="min-h-screen bg-gray-900 flex items-center justify-center">
         <div className="text-center">
-          <Loader2 className="h-12 w-12 animate-spin text-emerald-500 mx-auto mb-4" />
-          <h2 className="text-xl text-white font-semibold">Checking admin access...</h2>
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-emerald-500 mx-auto mb-4"></div>
+          <h2 className="text-xl text-white font-semibold">Checking authentication...</h2>
         </div>
       </div>
     );
   }
 
-  // Render not authorized state (should not reach here because of the redirect, but just in case)
-  if (!isAdmin) {
+  if (!isAuthenticated) {
     return (
-      <div className="min-h-screen bg-gray-900 flex items-center justify-center">
-        <div className="text-center">
-          <div className="bg-red-500/20 p-6 rounded-lg border border-red-500/50 mb-4 max-w-md mx-auto">
-            <h2 className="text-xl text-white font-semibold mb-2">Access Denied</h2>
-            <p className="text-gray-300">You don't have permission to access this page.</p>
+      <div className="min-h-screen bg-gray-900 flex items-center justify-center p-4">
+        <div className="bg-gray-800 p-6 rounded-lg shadow-xl max-w-md w-full">
+          <div className="text-center mb-6">
+            <Lock className="mx-auto text-emerald-500 h-12 w-12 mb-2" />
+            <h1 className="text-2xl font-bold text-white">Admin Login</h1>
+            <p className="text-gray-400">Sign in to access the admin dashboard</p>
           </div>
-          <button 
-            onClick={() => navigate('/')} 
-            className="px-4 py-2 bg-emerald-600 text-white rounded-md hover:bg-emerald-700 transition duration-200"
-          >
-            Return to Store
-          </button>
+          
+          <form onSubmit={handleLogin} className="space-y-4">
+            <div>
+              <label htmlFor="email" className="block text-sm font-medium text-gray-400 mb-1">
+                Email
+              </label>
+              <input
+                id="email"
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                required
+                className="w-full bg-gray-700 border border-gray-600 rounded-md py-2 px-3 text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+              />
+            </div>
+            <div>
+              <label htmlFor="password" className="block text-sm font-medium text-gray-400 mb-1">
+                Password
+              </label>
+              <input
+                id="password"
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                required
+                className="w-full bg-gray-700 border border-gray-600 rounded-md py-2 px-3 text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+              />
+            </div>
+            <button
+              type="submit"
+              disabled={loginLoading}
+              className="w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-emerald-600 hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-emerald-500"
+            >
+              {loginLoading ? (
+                <div className="animate-spin h-5 w-5 border-2 border-white border-t-transparent rounded-full"></div>
+              ) : (
+                'Sign In'
+              )}
+            </button>
+          </form>
+          
+          <div className="mt-6 text-center">
+            <Link to="/" className="inline-flex items-center text-sm text-emerald-400 hover:text-emerald-300">
+              <Home size={16} className="mr-1" />
+              Back to Store
+            </Link>
+          </div>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gray-900 flex flex-col">
+    <div className="min-h-screen bg-gray-900 text-white">
       {/* Header */}
-      <header className="p-4 sm:p-6 flex justify-between items-center border-b border-white/10">
-        <div className="flex items-center gap-3">
-          <img 
-            src="/favicon/favicon-32x32.png" 
-            alt="Champa Logo" 
-            className="w-8 h-8 sm:w-10 sm:h-10 rounded-full border-2 border-emerald-500"
-          />
-          <h1 className="text-white text-xl sm:text-2xl font-bold tracking-wider">CHAMPA ADMIN</h1>
+      <header className="bg-gray-800 border-b border-gray-700 p-4">
+        <div className="max-w-7xl mx-auto flex justify-between items-center">
+          <h1 className="text-2xl font-bold">Champa Admin</h1>
+          <div className="flex items-center space-x-4">
+            <button 
+              onClick={loadRanks} 
+              className="p-2 rounded-full hover:bg-gray-700 transition-colors"
+              title="Refresh data"
+            >
+              <RefreshCw size={20} />
+            </button>
+            <Link 
+              to="/"
+              className="p-2 rounded-full hover:bg-gray-700 transition-colors"
+              title="Go to Store"
+            >
+              <Home size={20} />
+            </Link>
+            <button 
+              onClick={handleLogout} 
+              className="p-2 rounded-full hover:bg-gray-700 transition-colors"
+              title="Sign Out"
+            >
+              <LogOut size={20} />
+            </button>
+          </div>
         </div>
-        <button 
-          onClick={() => navigate('/')} 
-          className="px-3 py-1 bg-emerald-600 text-white rounded-md hover:bg-emerald-700 transition duration-200"
-        >
-          Back to Store
-        </button>
       </header>
-
-      {/* Tab Navigation */}
-      <div className="bg-gray-800 px-4 py-3 border-b border-gray-700">
-        <div className="max-w-6xl mx-auto flex overflow-x-auto scrollbar-hide">
-          <TabButton 
-            label="Ranks" 
-            isActive={activeTab === 'ranks'} 
-            onClick={() => setActiveTab('ranks')} 
-          />
-          <TabButton 
-            label="Orders" 
-            isActive={activeTab === 'orders'} 
-            onClick={() => setActiveTab('orders')} 
-          />
-          <TabButton 
-            label="Images" 
-            isActive={activeTab === 'images'} 
-            onClick={() => setActiveTab('images')} 
-          />
+      
+      {/* Main content */}
+      <main className="max-w-7xl mx-auto p-4">
+        {/* Tabs */}
+        <div className="border-b border-gray-700 mb-6">
+          <div className="flex space-x-4">
+            <button 
+              onClick={() => setActiveTab('ranks')} 
+              className={`py-3 px-4 flex items-center space-x-2 border-b-2 ${
+                activeTab === 'ranks' 
+                  ? 'border-emerald-500 text-emerald-400' 
+                  : 'border-transparent hover:border-gray-600'
+              } transition-colors`}
+            >
+              <Shield size={18} />
+              <span>Ranks & Prices</span>
+            </button>
+            <button 
+              onClick={() => setActiveTab('images')} 
+              className={`py-3 px-4 flex items-center space-x-2 border-b-2 ${
+                activeTab === 'images' 
+                  ? 'border-emerald-500 text-emerald-400' 
+                  : 'border-transparent hover:border-gray-600'
+              } transition-colors`}
+            >
+              <Image size={18} />
+              <span>Images</span>
+            </button>
+          </div>
         </div>
-      </div>
-
-      {/* Content Area */}
-      <main className="flex-1 p-4 sm:p-6 overflow-y-auto">
-        <div className="max-w-6xl mx-auto bg-gray-800/50 rounded-lg p-4 sm:p-6">
-          {activeTab === 'ranks' && <RankManager />}
-          {activeTab === 'orders' && <OrderManager />}
-          {activeTab === 'images' && <ImageManager />}
+        
+        {/* Content area */}
+        <div className="bg-gray-800 rounded-lg overflow-hidden shadow-xl">
+          {loading ? (
+            <div className="p-8 text-center">
+              <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-emerald-500 mx-auto mb-4"></div>
+              <p>Loading data...</p>
+            </div>
+          ) : (
+            <>
+              {/* Ranks & Prices Tab */}
+              {activeTab === 'ranks' && (
+                <div className="overflow-x-auto">
+                  <table className="w-full table-auto">
+                    <thead className="bg-gray-700">
+                      <tr>
+                        <th className="p-3 text-left">Rank</th>
+                        <th className="p-3 text-left">Price ($)</th>
+                        <th className="p-3 text-left">Color</th>
+                        <th className="p-3 text-left">Description</th>
+                        <th className="p-3 text-right">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-700">
+                      {ranks.map(rank => (
+                        <tr key={rank.id} className="hover:bg-gray-750">
+                          <td className="p-3">
+                            <input
+                              type="text"
+                              value={rank.name}
+                              onChange={(e) => handleRankChange(rank.id, 'name', e.target.value)}
+                              className="bg-gray-900 border border-gray-600 rounded p-1 w-full"
+                            />
+                          </td>
+                          <td className="p-3">
+                            <input
+                              type="number"
+                              step="0.01"
+                              min="0"
+                              value={rank.price}
+                              onChange={(e) => handleRankChange(rank.id, 'price', parseFloat(e.target.value))}
+                              className="bg-gray-900 border border-gray-600 rounded p-1 w-full"
+                            />
+                          </td>
+                          <td className="p-3">
+                            <input
+                              type="text"
+                              value={rank.color}
+                              onChange={(e) => handleRankChange(rank.id, 'color', e.target.value)}
+                              className="bg-gray-900 border border-gray-600 rounded p-1 w-full"
+                            />
+                            <div className={`h-2 w-full rounded mt-1 bg-gradient-to-r ${rank.color}`}></div>
+                          </td>
+                          <td className="p-3">
+                            <input
+                              type="text"
+                              value={rank.description}
+                              onChange={(e) => handleRankChange(rank.id, 'description', e.target.value)}
+                              className="bg-gray-900 border border-gray-600 rounded p-1 w-full"
+                            />
+                          </td>
+                          <td className="p-3 text-right space-x-2 whitespace-nowrap">
+                            <button
+                              onClick={() => handleUpdateRank(rank.id, {
+                                name: rank.name,
+                                price: rank.price,
+                                color: rank.color,
+                                description: rank.description
+                              })}
+                              className="px-3 py-1 bg-blue-600 hover:bg-blue-700 rounded text-sm transition-colors"
+                              disabled={saving}
+                            >
+                              <Save size={14} className="inline mr-1" />
+                              Save
+                            </button>
+                            <button
+                              onClick={() => handleDeleteRank(rank.id)}
+                              className="px-3 py-1 bg-red-600 hover:bg-red-700 rounded text-sm transition-colors"
+                            >
+                              <Trash size={14} className="inline mr-1" />
+                              Delete
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  
+                  <div className="p-4 border-t border-gray-700">
+                    <button
+                      onClick={handleAddRank}
+                      className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 rounded transition-colors flex items-center"
+                      disabled={saving}
+                    >
+                      <Plus size={16} className="mr-2" />
+                      Add New Rank
+                    </button>
+                  </div>
+                </div>
+              )}
+              
+              {/* Images Tab */}
+              {activeTab === 'images' && (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 p-6">
+                  {ranks.map(rank => (
+                    <div key={rank.id} className="bg-gray-700 rounded-lg overflow-hidden shadow-md">
+                      <div className="p-4 bg-gradient-to-r from-gray-800 to-gray-700">
+                        <h3 className="font-bold text-lg">{rank.name}</h3>
+                      </div>
+                      
+                      <div className="p-4">
+                        <div className="aspect-square mb-4 border border-gray-600 rounded-lg overflow-hidden bg-gray-800 flex items-center justify-center">
+                          {rank.image ? (
+                            <img 
+                              src={rank.image} 
+                              alt={rank.name} 
+                              className="w-full h-full object-contain"
+                            />
+                          ) : (
+                            <div className="text-gray-500">No image</div>
+                          )}
+                        </div>
+                        
+                        <label className="block">
+                          <span className="sr-only">Choose image</span>
+                          <input 
+                            type="file" 
+                            accept="image/*"
+                            onChange={(e) => e.target.files && handleImageUpload(rank.id, e.target.files[0])}
+                            className="block w-full text-sm text-gray-400
+                              file:mr-4 file:py-2 file:px-4
+                              file:rounded file:border-0
+                              file:text-sm file:font-semibold
+                              file:bg-emerald-600 file:text-white
+                              hover:file:bg-emerald-700"
+                          />
+                        </label>
+                        
+                        <div className="mt-4">
+                          <label htmlFor={`image-url-${rank.id}`} className="block text-sm font-medium text-gray-400">
+                            Image URL
+                          </label>
+                          <div className="mt-1 flex rounded-md shadow-sm">
+                            <input
+                              type="text"
+                              id={`image-url-${rank.id}`}
+                              value={rank.image || ''}
+                              onChange={(e) => handleRankChange(rank.id, 'image', e.target.value)}
+                              className="flex-grow min-w-0 bg-gray-800 border border-gray-600 rounded-l-md p-2 text-sm"
+                            />
+                            <button
+                              onClick={() => handleUpdateRank(rank.id, { image: rank.image })}
+                              className="p-2 bg-blue-600 rounded-r-md hover:bg-blue-700 transition-colors"
+                            >
+                              <Save size={16} />
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </>
+          )}
         </div>
       </main>
     </div>
   );
-}
+};
 
-// Tab button component
-function TabButton({ 
-  label, 
-  isActive, 
-  onClick 
-}: { 
-  label: string; 
-  isActive: boolean; 
-  onClick: () => void;
-}) {
-  return (
-    <button
-      onClick={onClick}
-      className={`px-4 py-2 mr-1 whitespace-nowrap rounded-md font-medium transition duration-200 ${
-        isActive 
-          ? 'bg-emerald-600 text-white' 
-          : 'bg-gray-700/50 text-gray-300 hover:bg-gray-700 hover:text-white'
-      }`}
-    >
-      {label}
-    </button>
-  );
-} 
+export default Admin; 
