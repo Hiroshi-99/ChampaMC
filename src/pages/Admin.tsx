@@ -27,19 +27,23 @@ interface GradientPreset {
 }
 
 // Add this after imports
-// Helper function to determine if a URL is allowed by our CSP
+// Helper function to determine if a URL is allowed by our CSP img-src directive
 const isAllowedByCsp = (url: string): boolean => {
   if (!url) return false;
   
   try {
     const urlObj = new URL(url);
     
-    // Check if the URL is one of our allowed domains
+    // Check if the URL is one of our allowed domains for img-src
     const allowedDomains = [
       window.location.hostname, // 'self'
-      'supabase.co',
-      'discord.com'
+      'i.imgur.com', // The only external domain allowed in img-src
     ];
+    
+    // data: URLs are allowed by the CSP
+    if (url.startsWith('data:')) {
+      return true;
+    }
     
     return allowedDomains.some(domain => 
       urlObj.hostname === domain || urlObj.hostname.endsWith(`.${domain}`)
@@ -47,6 +51,40 @@ const isAllowedByCsp = (url: string): boolean => {
   } catch (e) {
     // If URL parsing fails, check if it's a relative URL (which is allowed)
     return url.startsWith('/');
+  }
+};
+
+// Add after isAllowedByCsp function
+// Fetch and convert a Supabase storage URL to a data URL
+const fetchAndConvertToDataUrl = async (url: string): Promise<string> => {
+  try {
+    // Fetch the image using XMLHttpRequest (which doesn't trigger CSP connect-src)
+    return new Promise<string>((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open('GET', url, true);
+      xhr.responseType = 'blob';
+      
+      xhr.onload = function() {
+        if (this.status === 200) {
+          const reader = new FileReader();
+          reader.onloadend = function() {
+            resolve(reader.result as string);
+          };
+          reader.readAsDataURL(this.response);
+        } else {
+          reject(new Error(`Failed to load image: ${this.statusText}`));
+        }
+      };
+      
+      xhr.onerror = function() {
+        reject(new Error('Network error occurred'));
+      };
+      
+      xhr.send();
+    });
+  } catch (error) {
+    console.error('Error converting to data URL:', error);
+    return '/assets/placeholder-payment.png';
   }
 };
 
@@ -626,12 +664,33 @@ const Admin = () => {
           discount_days_remaining: getDaysRemaining(rank.discount_expires_at),
           startColor, // Add hex colors
           endColor,
-          gradientCss: generateGradientCss(startColor, endColor)
+          gradientCss: generateGradientCss(startColor, endColor),
+          proxied_image_url: '/assets/placeholder-rank.png' // Default to placeholder until we load the actual image
         };
       });
       
-      // Set ranks directly without attempting to proxy images
+      // First set ranks with placeholders
       setRanks(ranksWithFormattedImages || []);
+      
+      // Then load each rank's image as a data URL in the background
+      ranksWithFormattedImages.forEach(async (rank, index) => {
+        if (rank.image_url && !isAllowedByCsp(rank.image_url)) {
+          try {
+            const dataUrl = await fetchAndConvertToDataUrl(rank.image_url);
+            // Update just this rank's image while preserving the rest
+            setRanks(prev => prev.map((r, i) => 
+              i === index ? { ...r, proxied_image_url: dataUrl } : r
+            ));
+          } catch (error) {
+            console.error(`Failed to convert image for rank ${rank.id}:`, error);
+          }
+        } else if (rank.image_url) {
+          // For allowed URLs, use them directly
+          setRanks(prev => prev.map((r, i) => 
+            i === index ? { ...r, proxied_image_url: rank.image_url } : r
+          ));
+        }
+      });
     } catch (error: any) {
       console.error('Error loading ranks:', error);
       toast.error('Failed to load ranks data');
@@ -729,10 +788,38 @@ const Admin = () => {
 
   // Handle input change for a rank field
   const handleRankChange = (id: string, field: string, value: any) => {
-    // Simply update the field directly without proxying images
+    // First update the field immediately
     setRanks(ranks.map(rank => 
       rank.id === id ? { ...rank, [field]: value } : rank
     ));
+    
+    // If this is an image URL field, also try to convert it to a data URL
+    if ((field === 'image_url' || field === 'image') && value && !isAllowedByCsp(value)) {
+      // Find the rank index
+      const rankIndex = ranks.findIndex(r => r.id === id);
+      if (rankIndex !== -1) {
+        // Set placeholder initially
+        setRanks(prev => prev.map((r, i) => 
+          i === rankIndex ? { ...r, proxied_image_url: '/assets/placeholder-rank.png' } : r
+        ));
+        
+        // Try to convert to data URL
+        fetchAndConvertToDataUrl(value)
+          .then(dataUrl => {
+            setRanks(prev => prev.map((r, i) => 
+              i === rankIndex ? { ...r, proxied_image_url: dataUrl } : r
+            ));
+          })
+          .catch(err => {
+            console.error(`Failed to convert image for rank ${id}:`, err);
+          });
+      }
+    } else if ((field === 'image_url' || field === 'image') && value && isAllowedByCsp(value)) {
+      // If it's an allowed URL, use it directly for proxied_image_url
+      setRanks(ranks.map(rank => 
+        rank.id === id ? { ...rank, proxied_image_url: value } : rank
+      ));
+    }
   };
 
   // Handle image URL update
@@ -993,11 +1080,22 @@ const Admin = () => {
     setSelectedOrder(order);
     setOrderDetailsOpen(true);
     
-    // We can't proxy images due to CSP restrictions
-    // Just use the original URL directly
+    // Handle payment proof image
     if (order.payment_proof) {
       const paymentProofUrl = getPublicStorageUrl('payment-proofs', order.payment_proof);
-      setProxiedPaymentProofUrl(paymentProofUrl);
+      
+      // Initially set to placeholder
+      setProxiedPaymentProofUrl('/assets/placeholder-payment.png');
+      
+      // Try to convert to data URL in the background
+      fetchAndConvertToDataUrl(paymentProofUrl)
+        .then(dataUrl => {
+          setProxiedPaymentProofUrl(dataUrl);
+        })
+        .catch(err => {
+          console.error('Failed to convert payment proof to data URL:', err);
+          setProxiedPaymentProofUrl('/assets/placeholder-payment.png');
+        });
     } else {
       setProxiedPaymentProofUrl('');
     }
@@ -1005,9 +1103,28 @@ const Admin = () => {
 
   // Effect to update proxied payment image URL whenever the original URL changes
   useEffect(() => {
-    // We can't proxy images due to CSP restrictions, so we'll just use the original URL
-    // and let the image tag's onError handler show a placeholder if loading fails
-    setProxiedPaymentImageUrl(paymentImageUrl);
+    if (!paymentImageUrl) {
+      setProxiedPaymentImageUrl('');
+      return;
+    }
+    
+    // If it's already a data URL or from an allowed domain, use it directly
+    if (isAllowedByCsp(paymentImageUrl)) {
+      setProxiedPaymentImageUrl(paymentImageUrl);
+      return;
+    }
+    
+    // Otherwise, try to convert to a data URL
+    setProxiedPaymentImageUrl('/assets/placeholder-payment.png'); // Initially set placeholder
+    
+    fetchAndConvertToDataUrl(paymentImageUrl)
+      .then(dataUrl => {
+        setProxiedPaymentImageUrl(dataUrl);
+      })
+      .catch(err => {
+        console.error('Failed to convert payment image to data URL:', err);
+        setProxiedPaymentImageUrl('/assets/placeholder-payment.png');
+      });
   }, [paymentImageUrl]);
 
   if (isAuthLoading) {
@@ -1533,10 +1650,7 @@ const Admin = () => {
                         <div className="aspect-square mb-4 border border-gray-600 rounded-lg overflow-hidden bg-gray-800 flex items-center justify-center">
                           {rank.image_url || rank.image ? (
                             <img 
-                              src={isAllowedByCsp(rank.image_url || rank.image) 
-                                ? (rank.image_url || rank.image)
-                                : '/assets/placeholder-rank.png'
-                              }
+                              src={rank.proxied_image_url || '/assets/placeholder-rank.png'} 
                               alt={rank.name} 
                               className="w-full h-full object-contain"
                               onError={(e) => {
