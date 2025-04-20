@@ -162,18 +162,31 @@ const fetchAndConvertToDataUrl = async (url: string | undefined): Promise<string
   }
 };
 
+// Helper to parse color field which might contain comma-separated hex colors
+const parseColorField = (colorField: string): { startColor?: string, endColor?: string } | null => {
+  if (!colorField) return null;
+  
+  // Check if it's a comma-separated color pair
+  if (colorField.includes(',')) {
+    const [startColor, endColor] = colorField.split(',');
+    return { startColor, endColor };
+  }
+  
+  return null;
+};
+
 // Add helper function to handle gradient styling
 const getGradientStyle = (rank: RankOption): string => {
   // For debugging - uncomment to see what data we're getting
-  // console.log('Rank gradient data:', {
-  //   name: rank.name,
-  //   color: rank.color,
-  //   gradientCss: rank.gradientCss,
-  //   gradient_preset: rank.gradient_preset,
-  //   custom_gradient: rank.custom_gradient,
-  //   startColor: rank.startColor,
-  //   endColor: rank.endColor
-  // });
+  console.log('Rank gradient data:', {
+    name: rank.name,
+    color: rank.color,
+    gradientCss: rank.gradientCss,
+    gradient_preset: rank.gradient_preset,
+    custom_gradient: rank.custom_gradient,
+    startColor: rank.startColor,
+    endColor: rank.endColor
+  });
   
   // For custom CSS gradients (likely from admin panel)
   if (rank.gradientCss) {
@@ -203,6 +216,12 @@ const getGradientStyle = (rank: RankOption): string => {
     return `bg-gradient-to-r from-[${rank.startColor}] to-[${rank.endColor}]`;
   }
   
+  // Check if color field contains comma-separated hex colors
+  const parsedColors = parseColorField(rank.color);
+  if (parsedColors && parsedColors.startColor && parsedColors.endColor) {
+    return `bg-gradient-to-r from-[${parsedColors.startColor}] to-[${parsedColors.endColor}]`;
+  }
+  
   // Fall back to the color property
   return `bg-gradient-to-r ${rank.color || 'from-emerald-500 to-emerald-600'}`;
 };
@@ -217,11 +236,29 @@ const getInlineGradientStyle = (rank: RankOption): React.CSSProperties | undefin
     };
   }
   
+  // Check if color field contains comma-separated hex colors
+  const parsedColors = parseColorField(rank.color);
+  if (parsedColors && parsedColors.startColor && parsedColors.endColor) {
+    return {
+      background: `linear-gradient(to right, ${parsedColors.startColor}, ${parsedColors.endColor})`
+    };
+  }
+  
   // If custom_gradient could be a CSS background value
   if (rank.custom_gradient && (
       rank.custom_gradient.includes('linear-gradient') || 
       rank.custom_gradient.includes('radial-gradient') ||
+      rank.custom_gradient.includes(',') ||
       rank.custom_gradient.startsWith('#'))) {
+    
+    // Check if it might be comma-separated hex colors
+    if (rank.custom_gradient.includes(',') && !rank.custom_gradient.includes('gradient')) {
+      const [color1, color2] = rank.custom_gradient.split(',');
+      return {
+        background: `linear-gradient(to right, ${color1.trim()}, ${color2.trim()})`
+      };
+    }
+    
     return {
       background: rank.custom_gradient.includes('gradient') 
         ? rank.custom_gradient 
@@ -233,7 +270,17 @@ const getInlineGradientStyle = (rank: RankOption): React.CSSProperties | undefin
   if (rank.gradientCss && (
       rank.gradientCss.includes('linear-gradient') || 
       rank.gradientCss.includes('radial-gradient') ||
+      rank.gradientCss.includes(',') ||
       rank.gradientCss.startsWith('#'))) {
+    
+    // Check if it might be comma-separated hex colors
+    if (rank.gradientCss.includes(',') && !rank.gradientCss.includes('gradient')) {
+      const [color1, color2] = rank.gradientCss.split(',');
+      return {
+        background: `linear-gradient(to right, ${color1.trim()}, ${color2.trim()})`
+      };
+    }
+    
     return {
       background: rank.gradientCss.includes('gradient') 
         ? rank.gradientCss 
@@ -285,6 +332,15 @@ export function OrderModal({ isOpen, onClose }: OrderModalProps) {
         // Transform data to match RankOption type with proper image fallbacks
         const formattedRanks: RankOption[] = data.map(rank => {
           console.log('Raw rank data from DB:', rank);
+          
+          // Parse color field if it contains a comma-separated pair of colors
+          let startColor, endColor;
+          if (rank.color && rank.color.includes(',') && !rank.start_color) {
+            const [colorStart, colorEnd] = rank.color.split(',');
+            startColor = colorStart.trim();
+            endColor = colorEnd.trim();
+          }
+          
           return {
             id: rank.id,
             name: rank.name,
@@ -297,8 +353,8 @@ export function OrderModal({ isOpen, onClose }: OrderModalProps) {
             gradient_preset: rank.gradient_preset,
             custom_gradient: rank.custom_gradient,
             gradientCss: rank.gradient_css || rank.gradientCss,
-            startColor: rank.start_color || rank.startColor,
-            endColor: rank.end_color || rank.endColor
+            startColor: rank.start_color || startColor,
+            endColor: rank.end_color || endColor
           };
         });
         
