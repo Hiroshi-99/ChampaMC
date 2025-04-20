@@ -26,6 +26,30 @@ interface GradientPreset {
   preview: string;
 }
 
+// Add this after imports
+// Helper function to determine if a URL is allowed by our CSP
+const isAllowedByCsp = (url: string): boolean => {
+  if (!url) return false;
+  
+  try {
+    const urlObj = new URL(url);
+    
+    // Check if the URL is one of our allowed domains
+    const allowedDomains = [
+      window.location.hostname, // 'self'
+      'supabase.co',
+      'discord.com'
+    ];
+    
+    return allowedDomains.some(domain => 
+      urlObj.hostname === domain || urlObj.hostname.endsWith(`.${domain}`)
+    );
+  } catch (e) {
+    // If URL parsing fails, check if it's a relative URL (which is allowed)
+    return url.startsWith('/');
+  }
+};
+
 // Enhanced Admin UI with Discount Management
 const Admin = () => {
   const navigate = useNavigate();
@@ -602,28 +626,12 @@ const Admin = () => {
           discount_days_remaining: getDaysRemaining(rank.discount_expires_at),
           startColor, // Add hex colors
           endColor,
-          gradientCss: generateGradientCss(startColor, endColor),
-          proxied_image_url: '', // Initialize empty proxied URL
+          gradientCss: generateGradientCss(startColor, endColor)
         };
       });
       
-      // Proxy all image URLs
-      const proxiedRanksPromises = ranksWithFormattedImages.map(async rank => {
-        if (rank.image_url) {
-          try {
-            const proxiedUrl = await proxyImage(rank.image_url);
-            return { ...rank, proxied_image_url: proxiedUrl };
-          } catch (err) {
-            console.error(`Failed to proxy image for rank ${rank.id}:`, err);
-            return rank;
-          }
-        }
-        return rank;
-      });
-      
-      // Wait for all proxy operations to complete
-      const proxiedRanks = await Promise.all(proxiedRanksPromises);
-      setRanks(proxiedRanks || []);
+      // Set ranks directly without attempting to proxy images
+      setRanks(ranksWithFormattedImages || []);
     } catch (error: any) {
       console.error('Error loading ranks:', error);
       toast.error('Failed to load ranks data');
@@ -721,35 +729,10 @@ const Admin = () => {
 
   // Handle input change for a rank field
   const handleRankChange = (id: string, field: string, value: any) => {
-    // If this is an image URL update, proxy the image
-    if (field === 'image_url' || field === 'image') {
-      // Only attempt to proxy if there's a non-empty URL
-      if (value) {
-        proxyImage(value).then(proxiedUrl => {
-          setRanks(ranks.map(rank => 
-            rank.id === id ? { 
-              ...rank, 
-              [field]: value,
-              proxied_image_url: proxiedUrl // Store the proxied URL
-            } : rank
-          ));
-        }).catch(err => {
-          console.error('Failed to proxy rank image:', err);
-          setRanks(ranks.map(rank => 
-            rank.id === id ? { ...rank, [field]: value } : rank
-          ));
-        });
-      } else {
-        setRanks(ranks.map(rank => 
-          rank.id === id ? { ...rank, [field]: value, proxied_image_url: '' } : rank
-        ));
-      }
-    } else {
-      // For other fields, just update normally
-      setRanks(ranks.map(rank => 
-        rank.id === id ? { ...rank, [field]: value } : rank
-      ));
-    }
+    // Simply update the field directly without proxying images
+    setRanks(ranks.map(rank => 
+      rank.id === id ? { ...rank, [field]: value } : rank
+    ));
   };
 
   // Handle image URL update
@@ -1010,15 +993,11 @@ const Admin = () => {
     setSelectedOrder(order);
     setOrderDetailsOpen(true);
     
-    // Proxy the payment proof image URL if it exists
+    // We can't proxy images due to CSP restrictions
+    // Just use the original URL directly
     if (order.payment_proof) {
       const paymentProofUrl = getPublicStorageUrl('payment-proofs', order.payment_proof);
-      proxyImage(paymentProofUrl).then(url => {
-        setProxiedPaymentProofUrl(url);
-      }).catch(err => {
-        console.error('Failed to proxy payment proof image:', err);
-        setProxiedPaymentProofUrl(paymentProofUrl); // Fallback to original URL
-      });
+      setProxiedPaymentProofUrl(paymentProofUrl);
     } else {
       setProxiedPaymentProofUrl('');
     }
@@ -1026,16 +1005,9 @@ const Admin = () => {
 
   // Effect to update proxied payment image URL whenever the original URL changes
   useEffect(() => {
-    if (paymentImageUrl) {
-      proxyImage(paymentImageUrl).then(url => {
-        setProxiedPaymentImageUrl(url);
-      }).catch(err => {
-        console.error('Failed to proxy payment image:', err);
-        setProxiedPaymentImageUrl(paymentImageUrl); // Fallback to original URL
-      });
-    } else {
-      setProxiedPaymentImageUrl('');
-    }
+    // We can't proxy images due to CSP restrictions, so we'll just use the original URL
+    // and let the image tag's onError handler show a placeholder if loading fails
+    setProxiedPaymentImageUrl(paymentImageUrl);
   }, [paymentImageUrl]);
 
   if (isAuthLoading) {
@@ -1561,10 +1533,14 @@ const Admin = () => {
                         <div className="aspect-square mb-4 border border-gray-600 rounded-lg overflow-hidden bg-gray-800 flex items-center justify-center">
                           {rank.image_url || rank.image ? (
                             <img 
-                              src={rank.proxied_image_url || '/assets/placeholder-rank.png'} 
+                              src={isAllowedByCsp(rank.image_url || rank.image) 
+                                ? (rank.image_url || rank.image)
+                                : '/assets/placeholder-rank.png'
+                              }
                               alt={rank.name} 
                               className="w-full h-full object-contain"
                               onError={(e) => {
+                                console.log(`Failed to load image for ${rank.name}, using placeholder`);
                                 e.currentTarget.src = '/assets/placeholder-rank.png';
                                 e.currentTarget.onerror = null; // Prevent infinite loop
                               }}
@@ -2099,11 +2075,15 @@ const Admin = () => {
                                 className="block"
                               >
                                 <img 
-                                  src={proxiedPaymentProofUrl} 
+                                  src={isAllowedByCsp(proxiedPaymentProofUrl) 
+                                    ? proxiedPaymentProofUrl
+                                    : '/assets/placeholder-payment.png'
+                                  } 
                                   alt="Payment proof" 
                                   className="max-h-60 max-w-full object-contain rounded shadow-lg"
                                   onError={(e) => {
-                                    e.currentTarget.src = 'https://placehold.co/400x400/gray/white?text=Image+Not+Available';
+                                    console.log("Failed to load payment proof, using placeholder");
+                                    e.currentTarget.src = '/assets/placeholder-payment.png';
                                   }}
                                 />
                               </a>
@@ -2210,15 +2190,26 @@ const Admin = () => {
                               <Save size={16} className="mr-2" />
                               Save Image
                             </button>
-                            <a
-                              href={proxiedPaymentImageUrl}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="px-3 py-2 bg-gray-700 hover:bg-gray-650 rounded transition-colors flex items-center"
-                            >
-                              <Eye size={16} className="mr-2" />
-                              View Image
-                            </a>
+                            {isAllowedByCsp(proxiedPaymentImageUrl) ? (
+                              <a
+                                href={proxiedPaymentImageUrl}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="px-3 py-2 bg-gray-700 hover:bg-gray-650 rounded transition-colors flex items-center"
+                              >
+                                <Eye size={16} className="mr-2" />
+                                View Image
+                              </a>
+                            ) : (
+                              <button
+                                className="px-3 py-2 bg-gray-700 opacity-50 cursor-not-allowed rounded transition-colors flex items-center"
+                                title="Image URL not allowed by Content Security Policy"
+                                disabled
+                              >
+                                <Eye size={16} className="mr-2" />
+                                View Image
+                              </button>
+                            )}
                           </div>
                         </div>
                         
@@ -2227,11 +2218,15 @@ const Admin = () => {
                           <div className="aspect-square max-h-60 border border-gray-600 rounded overflow-hidden flex items-center justify-center bg-white">
                             {proxiedPaymentImageUrl ? (
                               <img 
-                                src={proxiedPaymentImageUrl} 
+                                src={isAllowedByCsp(proxiedPaymentImageUrl) 
+                                  ? proxiedPaymentImageUrl
+                                  : '/assets/placeholder-payment.png'
+                                } 
                                 alt="Payment QR" 
                                 className="max-w-full max-h-full object-contain"
                                 onError={(e) => {
-                                  e.currentTarget.src = 'https://placehold.co/400x400/gray/white?text=Invalid+Image';
+                                  console.log("Failed to load QR image, using placeholder");
+                                  e.currentTarget.src = '/assets/placeholder-payment.png';
                                 }}
                               />
                             ) : (
