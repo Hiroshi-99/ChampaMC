@@ -164,6 +164,17 @@ const fetchAndConvertToDataUrl = async (url: string | undefined): Promise<string
 
 // Add helper function to handle gradient styling
 const getGradientStyle = (rank: RankOption): string => {
+  // For debugging - uncomment to see what data we're getting
+  // console.log('Rank gradient data:', {
+  //   name: rank.name,
+  //   color: rank.color,
+  //   gradientCss: rank.gradientCss,
+  //   gradient_preset: rank.gradient_preset,
+  //   custom_gradient: rank.custom_gradient,
+  //   startColor: rank.startColor,
+  //   endColor: rank.endColor
+  // });
+  
   // For custom CSS gradients (likely from admin panel)
   if (rank.gradientCss) {
     // If it's already a full CSS class string with bg-gradient, return as is
@@ -199,19 +210,34 @@ const getGradientStyle = (rank: RankOption): string => {
 // Helper to apply inline gradient style if needed
 const getInlineGradientStyle = (rank: RankOption): React.CSSProperties | undefined => {
   // Check if the gradient contains custom color values that need inline styles
-  if (rank.startColor && rank.startColor.startsWith('#') && 
-      rank.endColor && rank.endColor.startsWith('#')) {
+  if (rank.startColor && rank.endColor) {
+    // Always use inline styles for startColor/endColor for maximum compatibility
     return {
       background: `linear-gradient(to right, ${rank.startColor}, ${rank.endColor})`
     };
   }
   
-  // If custom_gradient looks like a CSS background value, not a class
+  // If custom_gradient could be a CSS background value
   if (rank.custom_gradient && (
       rank.custom_gradient.includes('linear-gradient') || 
-      rank.custom_gradient.includes('radial-gradient'))) {
+      rank.custom_gradient.includes('radial-gradient') ||
+      rank.custom_gradient.startsWith('#'))) {
     return {
-      background: rank.custom_gradient
+      background: rank.custom_gradient.includes('gradient') 
+        ? rank.custom_gradient 
+        : `linear-gradient(to right, ${rank.custom_gradient}, ${rank.custom_gradient})`
+    };
+  }
+  
+  // If gradientCss could be a CSS background value
+  if (rank.gradientCss && (
+      rank.gradientCss.includes('linear-gradient') || 
+      rank.gradientCss.includes('radial-gradient') ||
+      rank.gradientCss.startsWith('#'))) {
+    return {
+      background: rank.gradientCss.includes('gradient') 
+        ? rank.gradientCss 
+        : `linear-gradient(to right, ${rank.gradientCss}, ${rank.gradientCss})`
     };
   }
   
@@ -257,18 +283,24 @@ export function OrderModal({ isOpen, onClose }: OrderModalProps) {
         if (error) throw error;
         
         // Transform data to match RankOption type with proper image fallbacks
-        const formattedRanks: RankOption[] = data.map(rank => ({
-          id: rank.id,
-          name: rank.name,
-          price: rank.price,
-          color: rank.color,
-          image: rank.image_url || `https://i.imgur.com/placeholder.png`, // Ensure fallback
-          description: rank.description,
-          discount: rank.discount,
-          discount_expires_at: rank.discount_expires_at,
-          gradient_preset: rank.gradient_preset,
-          custom_gradient: rank.custom_gradient
-        }));
+        const formattedRanks: RankOption[] = data.map(rank => {
+          console.log('Raw rank data from DB:', rank);
+          return {
+            id: rank.id,
+            name: rank.name,
+            price: rank.price,
+            color: rank.color || 'from-emerald-500 to-emerald-600',
+            image: rank.image_url || `https://i.imgur.com/placeholder.png`, // Ensure fallback
+            description: rank.description,
+            discount: rank.discount,
+            discount_expires_at: rank.discount_expires_at,
+            gradient_preset: rank.gradient_preset,
+            custom_gradient: rank.custom_gradient,
+            gradientCss: rank.gradient_css || rank.gradientCss,
+            startColor: rank.start_color || rank.startColor,
+            endColor: rank.end_color || rank.endColor
+          };
+        });
         
         setRanks(formattedRanks);
         
@@ -474,6 +506,13 @@ export function OrderModal({ isOpen, onClose }: OrderModalProps) {
     // Fall back to default placeholder image
     setProxiedQrCode('/assets/placeholder-payment.png');
   }, []);
+
+  // Add a useEffect to log rank data when loaded for debugging
+  useEffect(() => {
+    if (ranks.length > 0) {
+      console.log('Loaded ranks with gradient data:', ranks);
+    }
+  }, [ranks]);
 
   // Early return if modal is not open
   if (!isOpen) return null;
@@ -871,7 +910,10 @@ export function OrderModal({ isOpen, onClose }: OrderModalProps) {
                             ? (inlineStyle ? '' : gradientClass) + ' text-white border-transparent'
                             : 'bg-gray-700/50 text-gray-300 border-gray-600 hover:bg-gray-600/50'
                         }`}
-                        style={selectedRank === rank.name ? inlineStyle : undefined}
+                        style={selectedRank === rank.name && inlineStyle ? {
+                          ...inlineStyle,
+                          borderColor: 'transparent'
+                        } : undefined}
                       >
                         <div className="font-medium truncate">{rank.name}</div>
                         <div className="flex justify-center items-center gap-1">
