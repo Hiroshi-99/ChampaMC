@@ -2,6 +2,8 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
+    <!-- Content Security Policy to allow images from trusted sources -->
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' https://*.imgur.com https://*.supabase.co https://api.qrserver.com data:; connect-src 'self' https://*.supabase.co wss://*.supabase.co; style-src 'self' 'unsafe-inline'; script-src 'self';">
     <!-- Replace default Vite favicon with custom favicon -->
     <link rel="icon" href="/favicon/favicon.ico" />
     <link rel="apple-touch-icon" sizes="180x180" href="/favicon/apple-touch-icon.png" />
