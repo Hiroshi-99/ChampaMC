@@ -2,8 +2,11 @@
 ALTER TABLE public.ranks
 ADD COLUMN IF NOT EXISTS discount_expires_at TIMESTAMPTZ;
 
--- Update the rank_details view to include expiration and handle expired discounts
-CREATE OR REPLACE VIEW public.rank_details AS
+-- First drop the existing view if it exists
+DROP VIEW IF EXISTS public.rank_details;
+
+-- Create the rank_details view with all columns including the new ones
+CREATE VIEW public.rank_details AS
 SELECT 
     id,
     name,

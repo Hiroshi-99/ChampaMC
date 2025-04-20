@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { RankOption } from '../types';
-import { Shield, DollarSign, Image, Save, Trash, RefreshCw, Plus, LogOut, Home, Lock, Tag, PercentIcon, Calendar, Clock } from 'lucide-react';
+import { Shield, DollarSign, Image, Save, Trash, RefreshCw, Plus, LogOut, Home, Lock, Tag, PercentIcon, Calendar, Clock, Check, Info } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useNavigate, Link } from 'react-router-dom';
 import { proxyImage } from '../lib/imageProxy';
@@ -21,6 +21,9 @@ const Admin = () => {
   const [loginLoading, setLoginLoading] = useState(false);
   const [orderStats, setOrderStats] = useState<any>(null);
   const [loadingStats, setLoadingStats] = useState(false);
+  const [bulkDiscount, setBulkDiscount] = useState<number>(0);
+  const [bulkDiscountExpiry, setBulkDiscountExpiry] = useState<string | null>(null);
+  const [applyingBulkDiscount, setApplyingBulkDiscount] = useState(false);
 
   // Check authentication status on component mount
   useEffect(() => {
@@ -287,6 +290,34 @@ const Admin = () => {
     const diffTime = expiry.getTime() - now.getTime();
     const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
     return diffDays;
+  };
+
+  // Add a function to apply discounts to all ranks
+  const applyDiscountToAllRanks = async () => {
+    if (bulkDiscount < 0 || bulkDiscount > 100) {
+      toast.error("Discount must be between 0 and 100%");
+      return;
+    }
+
+    setApplyingBulkDiscount(true);
+    try {
+      // Call the database function to apply the discount to all ranks
+      const { data, error } = await supabase.rpc('apply_bulk_discount', {
+        discount_value: bulkDiscount,
+        expires_at: bulkDiscountExpiry
+      });
+      
+      if (error) throw error;
+      
+      const updatedCount = data || 0;
+      toast.success(`Discount of ${bulkDiscount}% applied to ${updatedCount} ranks`);
+      await loadRanks(); // Reload all ranks with updated values
+    } catch (error: any) {
+      console.error('Error applying bulk discount:', error);
+      toast.error('Failed to apply discount to all ranks: ' + error.message);
+    } finally {
+      setApplyingBulkDiscount(false);
+    }
   };
 
   if (isAuthLoading) {
@@ -686,6 +717,189 @@ const Admin = () => {
                     <p className="text-gray-400 text-sm mt-1">
                       Set discount percentages and expiration dates for each rank. Discounts will be applied automatically on the store.
                     </p>
+                  </div>
+                  
+                  {/* Add bulk discount manager */}
+                  <div className="p-4 mb-2 bg-gray-800 border-b border-gray-700">
+                    <h3 className="text-md font-semibold flex items-center mb-3">
+                      <Tag size={16} className="text-blue-400 mr-2" />
+                      Bulk Discount Management
+                    </h3>
+                    
+                    <div className="bg-gray-750 p-4 rounded-lg border border-gray-700">
+                      <p className="text-sm text-gray-400 mb-3">
+                        Apply the same discount to all ranks at once. This will override any existing discounts.
+                      </p>
+                      
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <div>
+                          <label className="block text-sm text-gray-400 mb-1">
+                            Discount Percentage (0-100%)
+                          </label>
+                          <div className="flex items-center">
+                            <input
+                              type="number"
+                              min="0"
+                              max="100"
+                              value={bulkDiscount}
+                              onChange={(e) => setBulkDiscount(Math.min(Math.max(0, parseInt(e.target.value) || 0), 100))}
+                              className="bg-gray-800 border border-gray-600 rounded-l p-2 w-full"
+                            />
+                            <div className="bg-gray-700 px-2 py-2 rounded-r border-t border-r border-b border-gray-600">
+                              %
+                            </div>
+                          </div>
+                        </div>
+                        
+                        <div>
+                          <label className="block text-sm text-gray-400 mb-1 flex items-center">
+                            <Calendar size={14} className="mr-1" />
+                            Expiration Date (optional)
+                          </label>
+                          <div className="flex">
+                            <input
+                              type="datetime-local"
+                              value={bulkDiscountExpiry ? new Date(bulkDiscountExpiry).toISOString().slice(0, 16) : ''}
+                              onChange={(e) => setBulkDiscountExpiry(e.target.value ? new Date(e.target.value).toISOString() : null)}
+                              className="bg-gray-800 border border-gray-600 rounded-l p-2 w-full"
+                            />
+                            <button 
+                              type="button"
+                              onClick={() => setBulkDiscountExpiry(null)}
+                              className="bg-gray-700 px-2 py-2 rounded-r border-t border-r border-b border-gray-600 text-xs"
+                              title="Remove expiration date"
+                            >
+                              ∞
+                            </button>
+                          </div>
+                          <p className="text-xs text-gray-400 mt-1">
+                            {bulkDiscountExpiry 
+                              ? `Expires: ${formatDate(bulkDiscountExpiry)}` 
+                              : 'No expiration date (discount never expires)'}
+                          </p>
+                        </div>
+                        
+                        <div className="flex items-end">
+                          <button
+                            onClick={applyDiscountToAllRanks}
+                            disabled={applyingBulkDiscount}
+                            className="w-full py-2 bg-blue-600 hover:bg-blue-700 rounded text-center transition-colors flex items-center justify-center"
+                          >
+                            {applyingBulkDiscount ? (
+                              <>
+                                <div className="animate-spin h-4 w-4 border-2 border-white border-t-transparent rounded-full mr-2"></div>
+                                Applying...
+                              </>
+                            ) : (
+                              <>
+                                <Check size={14} className="mr-1" />
+                                Apply to All Ranks
+                              </>
+                            )}
+                          </button>
+                        </div>
+                      </div>
+                      
+                      <div className="mt-3 flex items-center">
+                        <div className="flex-1 h-px bg-gray-700"></div>
+                        <p className="px-2 text-sm text-gray-500">PREVIEW</p>
+                        <div className="flex-1 h-px bg-gray-700"></div>
+                      </div>
+                      
+                      <div className="mt-3 bg-gray-800/60 p-3 rounded border border-gray-700 text-sm text-gray-300">
+                        <h4 className="font-medium mb-2 flex items-center">
+                          <Info size={14} className="mr-1 text-blue-400" />
+                          What will happen
+                        </h4>
+                        
+                        <div className="flex flex-wrap gap-2 mb-2">
+                          {bulkDiscount > 0 ? (
+                            <div className="px-2 py-1 bg-emerald-700/30 text-emerald-400 rounded-full text-xs">
+                              {bulkDiscount}% discount on all {ranks.length} ranks
+                            </div>
+                          ) : (
+                            <div className="px-2 py-1 bg-red-700/30 text-red-400 rounded-full text-xs">
+                              Removing all discounts
+                            </div>
+                          )}
+                          
+                          {bulkDiscountExpiry ? (
+                            <div className="px-2 py-1 bg-blue-700/30 text-blue-400 rounded-full text-xs flex items-center">
+                              <Clock size={10} className="mr-1" />
+                              Expires on {formatDate(bulkDiscountExpiry)}
+                            </div>
+                          ) : (
+                            <div className="px-2 py-1 bg-purple-700/30 text-purple-400 rounded-full text-xs">
+                              No expiration date
+                            </div>
+                          )}
+                        </div>
+                        
+                        {bulkDiscount > 0 && (
+                          <div className="text-xs grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2">
+                            {ranks.slice(0, 3).map(rank => (
+                              <div key={rank.id} className="bg-gray-750 p-2 rounded flex items-center justify-between">
+                                <span>{rank.name}</span>
+                                <div>
+                                  <span className="line-through text-gray-500">${rank.price.toFixed(2)}</span>
+                                  <span className="ml-2 text-emerald-400">${getDiscountedPrice(rank.price, bulkDiscount)}</span>
+                                </div>
+                              </div>
+                            ))}
+                            {ranks.length > 3 && (
+                              <div className="bg-gray-750 p-2 rounded text-center text-gray-400">
+                                +{ranks.length - 3} more ranks
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                      
+                      <div className="mt-3 flex items-center">
+                        <div className="flex-1 h-px bg-gray-700"></div>
+                        <p className="px-2 text-sm text-gray-500">QUICK PRESETS</p>
+                        <div className="flex-1 h-px bg-gray-700"></div>
+                      </div>
+                      
+                      <div className="mt-3 grid grid-cols-1 md:grid-cols-4 gap-2">
+                        <button
+                          onClick={() => {
+                            setBulkDiscount(10);
+                            setBulkDiscountExpiry(new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString());
+                          }}
+                          className="bg-gray-700 py-1 px-2 rounded text-sm hover:bg-gray-650"
+                        >
+                          10% off (1 week)
+                        </button>
+                        <button
+                          onClick={() => {
+                            setBulkDiscount(20);
+                            setBulkDiscountExpiry(new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString());
+                          }}
+                          className="bg-gray-700 py-1 px-2 rounded text-sm hover:bg-gray-650"
+                        >
+                          20% off (3 days)
+                        </button>
+                        <button
+                          onClick={() => {
+                            setBulkDiscount(25);
+                            setBulkDiscountExpiry(new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString());
+                          }}
+                          className="bg-gray-700 py-1 px-2 rounded text-sm hover:bg-gray-650"
+                        >
+                          25% off (24 hours)
+                        </button>
+                        <button
+                          onClick={() => {
+                            setBulkDiscount(0);
+                            setBulkDiscountExpiry(null);
+                          }}
+                          className="bg-red-700/50 py-1 px-2 rounded text-sm hover:bg-red-700/70"
+                        >
+                          Remove All Discounts
+                        </button>
+                      </div>
+                    </div>
                   </div>
                   
                   <div className="p-4">
