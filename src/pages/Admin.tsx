@@ -78,7 +78,11 @@ const Admin = () => {
             
             // Update stats if they exist
             if (orderStats) {
-              setOrderStats(prev => ({
+              setOrderStats((prev: {
+                total_orders: number;
+                pending_orders: number;
+                [key: string]: any;
+              }) => ({
                 ...prev,
                 total_orders: prev.total_orders + 1,
                 pending_orders: prev.pending_orders + 1
