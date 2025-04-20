@@ -33,20 +33,17 @@ GRANT EXECUTE ON FUNCTION apply_bulk_discount(INTEGER, TIMESTAMPTZ) TO authentic
 -- Add comment to document function
 COMMENT ON FUNCTION apply_bulk_discount IS 'Applies the specified discount percentage to all ranks. Set discount to 0 to remove discounts.';
 
--- Create an RPC endpoint for the bulk discount function
-BEGIN;
-  SELECT supabase_functions.create_function(
-    'apply_bulk_discount',
-    $$
-      SELECT apply_bulk_discount(
-        discount_value := coalesce(rest.discount_value, 0)::integer,
-        expires_at := rest.expires_at::timestamptz
-      )
-    $$,
-    'Applies a discount to all ranks at once',
-    '{
-      "discount_value": {"type": "integer", "description": "Discount percentage (0-100)"},
-      "expires_at": {"type": "string", "format": "date-time", "description": "Optional expiration date (ISO format)"}
-    }'::jsonb
-  );
-COMMIT; 
+-- Create a simplified wrapper function that is directly callable as an RPC
+CREATE OR REPLACE FUNCTION public.rpc_apply_bulk_discount(
+  discount_value INTEGER DEFAULT 0,
+  expires_at TIMESTAMPTZ DEFAULT NULL
+) RETURNS INTEGER AS $$
+  -- Simply call the main function
+  SELECT apply_bulk_discount(discount_value, expires_at);
+$$ LANGUAGE SQL SECURITY DEFINER;
+
+-- Grant execute permission to authenticated users
+GRANT EXECUTE ON FUNCTION public.rpc_apply_bulk_discount(INTEGER, TIMESTAMPTZ) TO authenticated;
+
+-- Add comment to document function
+COMMENT ON FUNCTION public.rpc_apply_bulk_discount IS 'RPC endpoint to apply discount percentage to all ranks.'; 

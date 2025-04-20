@@ -1,10 +1,20 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { RankOption } from '../types';
-import { Shield, DollarSign, Image, Save, Trash, RefreshCw, Plus, LogOut, Home, Lock, Tag, PercentIcon, Calendar, Clock, Check, Info } from 'lucide-react';
+import { Shield, DollarSign, Image, Save, Trash, RefreshCw, Plus, LogOut, Home, Lock, Tag, PercentIcon, Calendar, Clock, Check, Info, Settings, Upload, Eye, CreditCard, Bell } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useNavigate, Link } from 'react-router-dom';
 import { proxyImage } from '../lib/imageProxy';
+
+// Add the Order interface
+interface Order {
+  id: string;
+  created_at: string;
+  user_id: string;
+  status: string;
+  total: number;
+  [key: string]: any;
+}
 
 // Enhanced Admin UI with Discount Management
 const Admin = () => {
@@ -24,11 +34,144 @@ const Admin = () => {
   const [bulkDiscount, setBulkDiscount] = useState<number>(0);
   const [bulkDiscountExpiry, setBulkDiscountExpiry] = useState<string | null>(null);
   const [applyingBulkDiscount, setApplyingBulkDiscount] = useState(false);
+  const [paymentImageUrl, setPaymentImageUrl] = useState('');
+  const [savingPaymentImage, setSavingPaymentImage] = useState(false);
+  const [realtimeNotifications, setRealtimeNotifications] = useState<any[]>([]);
+  const [showNotifications, setShowNotifications] = useState(false);
+  const [realtimeOrderCount, setRealtimeOrderCount] = useState(0);
+  const [user, setUser] = useState<any>(null);
+  const [ordersData, setOrdersData] = useState<Order[] | null>(null);
 
   // Check authentication status on component mount
   useEffect(() => {
     checkAuth();
   }, []);
+
+  // Set up real-time listeners for orders when authenticated as admin
+  useEffect(() => {
+    let orderSubscription: any = null;
+    let settingsSubscription: any = null;
+    
+    if (isAdmin) {
+      // Subscribe to new orders
+      orderSubscription = supabase
+        .channel('orders-changes')
+        .on(
+          'postgres_changes',
+          { event: 'INSERT', schema: 'public', table: 'orders' },
+          (payload) => {
+            const newOrder = payload.new;
+            // Add to notifications
+            setRealtimeNotifications(prev => [
+              { 
+                id: newOrder.id, 
+                type: 'new_order', 
+                message: `New order #${newOrder.id.substring(0, 8)} (${newOrder.status})`,
+                timestamp: new Date().toISOString(),
+                data: newOrder
+              },
+              ...prev.slice(0, 9) // Keep only last 10 notifications
+            ]);
+            
+            // Increment realtime order counter
+            setRealtimeOrderCount(prev => prev + 1);
+            
+            // Update stats if they exist
+            if (orderStats) {
+              setOrderStats(prev => ({
+                ...prev,
+                total_orders: prev.total_orders + 1,
+                pending_orders: prev.pending_orders + 1
+              }));
+            }
+            
+            // Show toast notification
+            toast.success('New order received!', {
+              icon: '🛒',
+              duration: 5000,
+            });
+          }
+        )
+        .on(
+          'postgres_changes',
+          { event: 'UPDATE', schema: 'public', table: 'orders' },
+          (payload) => {
+            const updatedOrder = payload.new;
+            // Add to notifications
+            setRealtimeNotifications(prev => [
+              { 
+                id: updatedOrder.id, 
+                type: 'updated_order', 
+                message: `Order #${updatedOrder.id.substring(0, 8)} updated to ${updatedOrder.status}`,
+                timestamp: new Date().toISOString(),
+                data: updatedOrder
+              },
+              ...prev.slice(0, 9) // Keep only last 10 notifications
+            ]);
+          }
+        )
+        .subscribe();
+      
+      // Subscribe to settings changes (for payment image updates)
+      settingsSubscription = supabase
+        .channel('settings-changes')
+        .on(
+          'postgres_changes',
+          { event: 'UPDATE', schema: 'public', table: 'store_settings' },
+          (payload) => {
+            const updatedSetting = payload.new;
+            if (updatedSetting.key === 'payment_details') {
+              // Update payment image URL if it was changed in another admin session
+              const paymentDetails = updatedSetting.value;
+              setPaymentImageUrl(paymentDetails.qr_image_url);
+              toast.success('Payment details updated', { duration: 3000 });
+            }
+          }
+        )
+        .subscribe();
+    }
+    
+    // Cleanup subscriptions on unmount
+    return () => {
+      if (orderSubscription) orderSubscription.unsubscribe();
+      if (settingsSubscription) settingsSubscription.unsubscribe();
+    };
+  }, [isAdmin, orderStats]);
+
+  // Subscribe to order changes
+  useEffect(() => {
+    if (!user) return;
+    
+    // Subscribe to all new orders
+    const orderSubscription = supabase
+      .channel('orders-channel')
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'orders'
+        },
+        (payload) => {
+          // Add the new order to the state
+          setOrdersData((prev: Order[] | null) => {
+            if (!prev) return [payload.new as Order];
+            return [payload.new as Order, ...prev];
+          });
+          
+          // Show notification for new order
+          toast.success('New order received!', {
+            position: 'top-right',
+            duration: 5000,
+          });
+        }
+      )
+      .subscribe();
+      
+    return () => {
+      supabase.removeChannel(orderSubscription);
+    };
+  }, [user]);
 
   // Check if user is authenticated and an admin
   const checkAuth = async () => {
@@ -51,6 +194,7 @@ const Admin = () => {
           setIsAdmin(true);
           loadRanks(); // Load ranks if user is an admin
           loadOrderStats(); // Load order statistics
+          loadPaymentDetails(); // Load payment details
         } else {
           toast.error('You do not have admin privileges');
           navigate('/');
@@ -60,6 +204,57 @@ const Admin = () => {
       console.error('Auth check failed:', error);
     } finally {
       setIsAuthLoading(false);
+    }
+  };
+
+  // Load payment details from store settings
+  const loadPaymentDetails = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('store_settings')
+        .select('value')
+        .eq('key', 'payment_details')
+        .single();
+      
+      if (error) throw error;
+      
+      if (data && data.value) {
+        const paymentDetails = data.value;
+        setPaymentImageUrl(paymentDetails.qr_image_url || '');
+      }
+    } catch (error: any) {
+      console.error('Error loading payment details:', error);
+      toast.error('Failed to load payment details');
+    }
+  };
+
+  // Save payment image URL
+  const savePaymentImage = async () => {
+    if (!paymentImageUrl.trim()) {
+      toast.error('Please enter a valid image URL');
+      return;
+    }
+    
+    setSavingPaymentImage(true);
+    try {
+      const { data, error } = await supabase
+        .from('store_settings')
+        .update({
+          value: {
+            qr_image_url: paymentImageUrl,
+            updated_at: new Date().toISOString()
+          }
+        })
+        .eq('key', 'payment_details');
+      
+      if (error) throw error;
+      
+      toast.success('Payment image updated successfully');
+    } catch (error: any) {
+      console.error('Error updating payment image:', error);
+      toast.error('Failed to update payment image');
+    } finally {
+      setSavingPaymentImage(false);
     }
   };
 
@@ -89,6 +284,7 @@ const Admin = () => {
           setIsAdmin(true);
           loadRanks(); // Load ranks after successful login
           loadOrderStats(); // Load order statistics
+          loadPaymentDetails(); // Load payment details
         } else {
           toast.error('You do not have admin privileges');
           await supabase.auth.signOut();
@@ -130,6 +326,25 @@ const Admin = () => {
     } finally {
       setLoadingStats(false);
     }
+  };
+
+  // Reset notification counter
+  const clearNotificationCounter = () => {
+    setRealtimeOrderCount(0);
+    setShowNotifications(!showNotifications);
+  };
+
+  // Format relative time for notifications
+  const formatRelativeTime = (dateString: string) => {
+    const date = new Date(dateString);
+    const now = new Date();
+    const diffMs = now.getTime() - date.getTime();
+    const diffSeconds = Math.floor(diffMs / 1000);
+    
+    if (diffSeconds < 60) return `${diffSeconds} seconds ago`;
+    if (diffSeconds < 3600) return `${Math.floor(diffSeconds / 60)} minutes ago`;
+    if (diffSeconds < 86400) return `${Math.floor(diffSeconds / 3600)} hours ago`;
+    return `${Math.floor(diffSeconds / 86400)} days ago`;
   };
 
   // Function to load ranks from database
@@ -302,7 +517,7 @@ const Admin = () => {
     setApplyingBulkDiscount(true);
     try {
       // Call the database function to apply the discount to all ranks
-      const { data, error } = await supabase.rpc('apply_bulk_discount', {
+      const { data, error } = await supabase.rpc('rpc_apply_bulk_discount', {
         discount_value: bulkDiscount,
         expires_at: bulkDiscountExpiry
       });
@@ -399,10 +614,70 @@ const Admin = () => {
         <div className="max-w-7xl mx-auto flex justify-between items-center">
           <h1 className="text-2xl font-bold">Champa Admin</h1>
           <div className="flex items-center space-x-4">
+            <div className="relative">
+              <button 
+                onClick={clearNotificationCounter} 
+                className="p-2 rounded-full hover:bg-gray-700 transition-colors relative"
+                title="Notifications"
+              >
+                <Bell size={20} />
+                {realtimeOrderCount > 0 && (
+                  <span className="absolute -top-1 -right-1 bg-red-500 text-white text-xs rounded-full w-5 h-5 flex items-center justify-center">
+                    {realtimeOrderCount}
+                  </span>
+                )}
+              </button>
+              
+              {/* Notifications dropdown */}
+              {showNotifications && (
+                <div className="absolute right-0 mt-2 w-80 bg-gray-800 border border-gray-700 rounded-lg shadow-xl z-10">
+                  <div className="p-3 border-b border-gray-700">
+                    <h3 className="font-medium">Recent Notifications</h3>
+                  </div>
+                  <div className="max-h-96 overflow-y-auto">
+                    {realtimeNotifications.length > 0 ? (
+                      <div className="divide-y divide-gray-700">
+                        {realtimeNotifications.map((notification) => (
+                          <div key={notification.id + notification.timestamp} className="p-3 hover:bg-gray-750">
+                            <div className="flex items-start">
+                              <div className={`p-1.5 rounded-full mr-2 ${
+                                notification.type === 'new_order' 
+                                  ? 'bg-blue-500/20 text-blue-400' 
+                                  : 'bg-green-500/20 text-green-400'
+                              }`}>
+                                {notification.type === 'new_order' ? <Plus size={14} /> : <RefreshCw size={14} />}
+                              </div>
+                              <div className="flex-1">
+                                <p className="text-sm">{notification.message}</p>
+                                <p className="text-xs text-gray-400 mt-1">{formatRelativeTime(notification.timestamp)}</p>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="p-4 text-center text-gray-400 text-sm">
+                        No new notifications
+                      </div>
+                    )}
+                  </div>
+                  <div className="p-2 border-t border-gray-700">
+                    <button 
+                      onClick={() => setRealtimeNotifications([])} 
+                      className="w-full py-1.5 bg-gray-700 hover:bg-gray-650 rounded text-sm"
+                    >
+                      Clear All
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+            
             <button 
               onClick={() => {
                 loadRanks();
                 loadOrderStats();
+                loadPaymentDetails();
               }} 
               className="p-2 rounded-full hover:bg-gray-700 transition-colors"
               title="Refresh data"
@@ -507,7 +782,7 @@ const Admin = () => {
         
         {/* Tabs */}
         <div className="border-b border-gray-700 mb-6">
-          <div className="flex space-x-4">
+          <div className="flex space-x-4 overflow-x-auto pb-1">
             <button 
               onClick={() => setActiveTab('ranks')} 
               className={`py-3 px-4 flex items-center space-x-2 border-b-2 ${
@@ -540,6 +815,17 @@ const Admin = () => {
             >
               <PercentIcon size={18} />
               <span>Discounts</span>
+            </button>
+            <button 
+              onClick={() => setActiveTab('settings')} 
+              className={`py-3 px-4 flex items-center space-x-2 border-b-2 ${
+                activeTab === 'settings' 
+                  ? 'border-emerald-500 text-emerald-400' 
+                  : 'border-transparent hover:border-gray-600'
+              } transition-colors`}
+            >
+              <Settings size={18} />
+              <span>Settings</span>
             </button>
           </div>
         </div>
@@ -1014,6 +1300,104 @@ const Admin = () => {
                           </button>
                         </div>
                       ))}
+                    </div>
+                  </div>
+                </div>
+              )}
+              
+              {/* Settings Tab */}
+              {activeTab === 'settings' && (
+                <div className="p-6">
+                  <div className="mb-6">
+                    <h2 className="text-lg font-semibold mb-4 flex items-center">
+                      <CreditCard size={18} className="text-blue-400 mr-2" />
+                      Payment Details
+                    </h2>
+                    
+                    <div className="bg-gray-750 rounded-lg p-4 border border-gray-700">
+                      <p className="text-sm text-gray-400 mb-4">
+                        Configure the payment QR code image shown to customers during checkout. This should be a direct link to an image of your payment QR code.
+                      </p>
+                      
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div>
+                          <label className="block text-sm text-gray-400 mb-2">
+                            Payment QR Code Image URL
+                          </label>
+                          <div className="flex">
+                            <input
+                              type="text"
+                              value={paymentImageUrl}
+                              onChange={(e) => setPaymentImageUrl(e.target.value)}
+                              placeholder="https://example.com/qrcode.png"
+                              className="flex-1 bg-gray-800 border border-gray-600 rounded-l p-2 text-sm"
+                            />
+                            <button
+                              onClick={savePaymentImage}
+                              disabled={savingPaymentImage}
+                              className="p-2 bg-blue-600 rounded-r hover:bg-blue-700 transition-colors flex items-center"
+                            >
+                              {savingPaymentImage ? (
+                                <div className="animate-spin h-5 w-5 border-2 border-white border-t-transparent rounded-full"></div>
+                              ) : (
+                                <>
+                                  <Save size={16} />
+                                </>
+                              )}
+                            </button>
+                          </div>
+                          <p className="text-xs text-gray-400 mt-1">
+                            Use a direct image URL. The image will be displayed to customers during checkout.
+                          </p>
+                          
+                          <div className="mt-4 flex items-center gap-2">
+                            <button
+                              onClick={savePaymentImage}
+                              disabled={savingPaymentImage}
+                              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded transition-colors flex items-center"
+                            >
+                              <Save size={16} className="mr-2" />
+                              Save Image
+                            </button>
+                            <a
+                              href={paymentImageUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="px-3 py-2 bg-gray-700 hover:bg-gray-650 rounded transition-colors flex items-center"
+                            >
+                              <Eye size={16} className="mr-2" />
+                              View Image
+                            </a>
+                          </div>
+                        </div>
+                        
+                        <div className="bg-gray-800 rounded-lg p-4 border border-gray-700">
+                          <h4 className="text-sm font-medium mb-2 text-gray-400">Preview</h4>
+                          <div className="aspect-square max-h-60 border border-gray-600 rounded overflow-hidden flex items-center justify-center bg-white">
+                            {paymentImageUrl ? (
+                              <img 
+                                src={paymentImageUrl} 
+                                alt="Payment QR" 
+                                className="max-w-full max-h-full object-contain"
+                                onError={(e) => {
+                                  e.currentTarget.src = 'https://placehold.co/400x400/gray/white?text=Invalid+Image';
+                                }}
+                              />
+                            ) : (
+                              <div className="text-gray-500 text-center p-4">
+                                <Upload className="mx-auto mb-2 h-10 w-10" />
+                                <p>No payment QR image set</p>
+                              </div>
+                            )}
+                          </div>
+                          
+                          <div className="bg-blue-900/20 border border-blue-800 rounded p-3 mt-3">
+                            <p className="text-xs text-blue-400">
+                              <span className="font-medium">Real-time Updates:</span> When you update this image, it will be instantly available to all customers. Any open checkout pages will show the new QR code.
+                            </p>
+                          </div>
+                        </div>
+                      </div>
                     </div>
                   </div>
                 </div>
