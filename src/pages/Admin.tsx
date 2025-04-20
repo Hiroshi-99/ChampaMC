@@ -45,6 +45,8 @@ const Admin = () => {
   const [bulkDiscountExpiry, setBulkDiscountExpiry] = useState<string | null>(null);
   const [applyingBulkDiscount, setApplyingBulkDiscount] = useState(false);
   const [paymentImageUrl, setPaymentImageUrl] = useState('');
+  const [proxiedPaymentImageUrl, setProxiedPaymentImageUrl] = useState('');
+  const [proxiedPaymentProofUrl, setProxiedPaymentProofUrl] = useState<string>('');
   const [savingPaymentImage, setSavingPaymentImage] = useState(false);
   const [realtimeNotifications, setRealtimeNotifications] = useState<any[]>([]);
   const [showNotifications, setShowNotifications] = useState(false);
@@ -600,11 +602,28 @@ const Admin = () => {
           discount_days_remaining: getDaysRemaining(rank.discount_expires_at),
           startColor, // Add hex colors
           endColor,
-          gradientCss: generateGradientCss(startColor, endColor)
+          gradientCss: generateGradientCss(startColor, endColor),
+          proxied_image_url: '', // Initialize empty proxied URL
         };
       });
       
-      setRanks(ranksWithFormattedImages || []);
+      // Proxy all image URLs
+      const proxiedRanksPromises = ranksWithFormattedImages.map(async rank => {
+        if (rank.image_url) {
+          try {
+            const proxiedUrl = await proxyImage(rank.image_url);
+            return { ...rank, proxied_image_url: proxiedUrl };
+          } catch (err) {
+            console.error(`Failed to proxy image for rank ${rank.id}:`, err);
+            return rank;
+          }
+        }
+        return rank;
+      });
+      
+      // Wait for all proxy operations to complete
+      const proxiedRanks = await Promise.all(proxiedRanksPromises);
+      setRanks(proxiedRanks || []);
     } catch (error: any) {
       console.error('Error loading ranks:', error);
       toast.error('Failed to load ranks data');
@@ -702,9 +721,35 @@ const Admin = () => {
 
   // Handle input change for a rank field
   const handleRankChange = (id: string, field: string, value: any) => {
-    setRanks(ranks.map(rank => 
-      rank.id === id ? { ...rank, [field]: value } : rank
-    ));
+    // If this is an image URL update, proxy the image
+    if (field === 'image_url' || field === 'image') {
+      // Only attempt to proxy if there's a non-empty URL
+      if (value) {
+        proxyImage(value).then(proxiedUrl => {
+          setRanks(ranks.map(rank => 
+            rank.id === id ? { 
+              ...rank, 
+              [field]: value,
+              proxied_image_url: proxiedUrl // Store the proxied URL
+            } : rank
+          ));
+        }).catch(err => {
+          console.error('Failed to proxy rank image:', err);
+          setRanks(ranks.map(rank => 
+            rank.id === id ? { ...rank, [field]: value } : rank
+          ));
+        });
+      } else {
+        setRanks(ranks.map(rank => 
+          rank.id === id ? { ...rank, [field]: value, proxied_image_url: '' } : rank
+        ));
+      }
+    } else {
+      // For other fields, just update normally
+      setRanks(ranks.map(rank => 
+        rank.id === id ? { ...rank, [field]: value } : rank
+      ));
+    }
   };
 
   // Handle image URL update
@@ -964,7 +1009,34 @@ const Admin = () => {
   const viewOrderDetails = (order: Order) => {
     setSelectedOrder(order);
     setOrderDetailsOpen(true);
+    
+    // Proxy the payment proof image URL if it exists
+    if (order.payment_proof) {
+      const paymentProofUrl = getPublicStorageUrl('payment-proofs', order.payment_proof);
+      proxyImage(paymentProofUrl).then(url => {
+        setProxiedPaymentProofUrl(url);
+      }).catch(err => {
+        console.error('Failed to proxy payment proof image:', err);
+        setProxiedPaymentProofUrl(paymentProofUrl); // Fallback to original URL
+      });
+    } else {
+      setProxiedPaymentProofUrl('');
+    }
   };
+
+  // Effect to update proxied payment image URL whenever the original URL changes
+  useEffect(() => {
+    if (paymentImageUrl) {
+      proxyImage(paymentImageUrl).then(url => {
+        setProxiedPaymentImageUrl(url);
+      }).catch(err => {
+        console.error('Failed to proxy payment image:', err);
+        setProxiedPaymentImageUrl(paymentImageUrl); // Fallback to original URL
+      });
+    } else {
+      setProxiedPaymentImageUrl('');
+    }
+  }, [paymentImageUrl]);
 
   if (isAuthLoading) {
     return (
@@ -1489,7 +1561,7 @@ const Admin = () => {
                         <div className="aspect-square mb-4 border border-gray-600 rounded-lg overflow-hidden bg-gray-800 flex items-center justify-center">
                           {rank.image_url || rank.image ? (
                             <img 
-                              src={rank.image_url || rank.image} 
+                              src={rank.proxied_image_url || '/assets/placeholder-rank.png'} 
                               alt={rank.name} 
                               className="w-full h-full object-contain"
                               onError={(e) => {
@@ -2021,13 +2093,13 @@ const Admin = () => {
                           <div className="bg-gray-700 rounded-lg p-2 flex justify-center">
                             {selectedOrder.payment_proof ? (
                               <a 
-                                href={getPublicStorageUrl('payment-proofs', selectedOrder.payment_proof)} 
+                                href={proxiedPaymentProofUrl} 
                                 target="_blank" 
                                 rel="noopener noreferrer"
                                 className="block"
                               >
                                 <img 
-                                  src={getPublicStorageUrl('payment-proofs', selectedOrder.payment_proof)} 
+                                  src={proxiedPaymentProofUrl} 
                                   alt="Payment proof" 
                                   className="max-h-60 max-w-full object-contain rounded shadow-lg"
                                   onError={(e) => {
@@ -2139,7 +2211,7 @@ const Admin = () => {
                               Save Image
                             </button>
                             <a
-                              href={paymentImageUrl}
+                              href={proxiedPaymentImageUrl}
                               target="_blank"
                               rel="noopener noreferrer"
                               className="px-3 py-2 bg-gray-700 hover:bg-gray-650 rounded transition-colors flex items-center"
@@ -2153,9 +2225,9 @@ const Admin = () => {
                         <div className="bg-gray-800 rounded-lg p-4 border border-gray-700">
                           <h4 className="text-sm font-medium mb-2 text-gray-400">Preview</h4>
                           <div className="aspect-square max-h-60 border border-gray-600 rounded overflow-hidden flex items-center justify-center bg-white">
-                            {paymentImageUrl ? (
+                            {proxiedPaymentImageUrl ? (
                               <img 
-                                src={paymentImageUrl} 
+                                src={proxiedPaymentImageUrl} 
                                 alt="Payment QR" 
                                 className="max-w-full max-h-full object-contain"
                                 onError={(e) => {
