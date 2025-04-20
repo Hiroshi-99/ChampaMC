@@ -21,6 +21,7 @@ export interface RankOption {
   description?: string;
   created_at?: string;
   updated_at?: string;
+  discount?: number;
 }
 
 // Discord webhook types

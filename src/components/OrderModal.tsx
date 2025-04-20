@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useCallback, useEffect } from 'react';
-import { X, Upload, Info, CreditCard, User, Shield } from 'lucide-react';
+import { X, Upload, Info, CreditCard, User, Shield, Tag, PercentIcon } from 'lucide-react';
 import { supabase, getPublicStorageUrl } from '../lib/supabase';
 import toast from 'react-hot-toast';
 import { RankOption, Order } from '../types';
@@ -97,7 +97,8 @@ export function OrderModal({ isOpen, onClose }: OrderModalProps) {
           price: rank.price,
           color: rank.color,
           image: rank.image_url || `https://i.imgur.com/placeholder.png`, // Ensure fallback
-          description: rank.description
+          description: rank.description,
+          discount: rank.discount
         }));
         
         setRanks(formattedRanks);
@@ -198,6 +199,12 @@ export function OrderModal({ isOpen, onClose }: OrderModalProps) {
       console.error('Error in sendToDiscord function:', error);
       // Don't throw error to prevent blocking the order process
     }
+  };
+
+  // Add a function to calculate the discounted price
+  const getDiscountedPrice = (price: number, discount?: number): string => {
+    if (!discount) return price.toFixed(2);
+    return ((price * (100 - discount)) / 100).toFixed(2);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -518,7 +525,17 @@ export function OrderModal({ isOpen, onClose }: OrderModalProps) {
                       }`}
                     >
                       <div className="font-medium truncate">{rank.name}</div>
-                      <div className="text-xs sm:text-sm">${rank.price}</div>
+                      <div className="flex justify-center items-center gap-1">
+                        {rank.discount && rank.discount > 0 ? (
+                          <>
+                            <span className="line-through text-gray-400 text-xs">${rank.price.toFixed(2)}</span>
+                            <span className="text-xs sm:text-sm">${getDiscountedPrice(rank.price, rank.discount)}</span>
+                            <span className="bg-emerald-600 text-white text-[10px] px-1 rounded-sm ml-1">-{rank.discount}%</span>
+                          </>
+                        ) : (
+                          <span className="text-xs sm:text-sm">${rank.price.toFixed(2)}</span>
+                        )}
+                      </div>
                     </button>
                   ))}
                 </div>
@@ -539,13 +556,26 @@ export function OrderModal({ isOpen, onClose }: OrderModalProps) {
                       loading="lazy"
                       onError={(e) => {
                         // Fallback image if the main one fails to load
-                        e.currentTarget.src = 'https://i.imgur.com/placeholder.png';
+                        e.currentTarget.src = '/assets/placeholder-rank.png';
                         e.currentTarget.onerror = null; // Prevent infinite loop
                       }}
                     />
                   </div>
                   {selectedRankOption.description && (
                     <p className="mt-3 text-gray-300 text-sm">{selectedRankOption.description}</p>
+                  )}
+                  
+                  {/* Show discount badge if applicable */}
+                  {selectedRankOption.discount && selectedRankOption.discount > 0 && (
+                    <div className="mt-3 bg-emerald-900/20 border border-emerald-800 rounded p-2 flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <PercentIcon size={16} className="text-emerald-400" />
+                        <span className="text-emerald-400 text-sm font-medium">Discount Applied</span>
+                      </div>
+                      <div className="bg-emerald-700 text-white text-xs font-bold rounded-full px-2 py-1">
+                        SAVE {selectedRankOption.discount}%
+                      </div>
+                    </div>
                   )}
                 </div>
               )}
@@ -566,7 +596,16 @@ export function OrderModal({ isOpen, onClose }: OrderModalProps) {
                       loading="lazy"
                     />
                   </div>
-                  <p className="text-xs sm:text-sm text-gray-400 mt-2">Amount: ${selectedRankPrice}</p>
+                  {selectedRankOption && selectedRankOption.discount && selectedRankOption.discount > 0 ? (
+                    <div className="text-center mt-2">
+                      <p className="text-xs sm:text-sm text-gray-400 line-through">Original: ${selectedRankOption.price.toFixed(2)}</p>
+                      <p className="text-sm sm:text-base text-emerald-400 font-medium">
+                        Amount: ${getDiscountedPrice(selectedRankOption.price, selectedRankOption.discount)}
+                      </p>
+                    </div>
+                  ) : (
+                    <p className="text-xs sm:text-sm text-gray-400 mt-2">Amount: ${selectedRankPrice}</p>
+                  )}
                 </div>
               </div>
 
