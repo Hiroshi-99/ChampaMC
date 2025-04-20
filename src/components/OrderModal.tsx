@@ -92,6 +92,71 @@ const isDiscountActive = (rank: RankOption): boolean => {
   return new Date(rank.discount_expires_at) > new Date();
 };
 
+// Helper function to determine if a URL is allowed by CSP img-src directive
+const isAllowedByCsp = (url: string): boolean => {
+  if (!url) return false;
+  
+  try {
+    const urlObj = new URL(url);
+    
+    // Check if the URL is one of our allowed domains for img-src
+    const allowedDomains = [
+      window.location.hostname, // 'self'
+      'i.imgur.com', // The only external domain allowed in img-src
+    ];
+    
+    // data: URLs are allowed by the CSP
+    if (url.startsWith('data:')) {
+      return true;
+    }
+    
+    return allowedDomains.some(domain => 
+      urlObj.hostname === domain || urlObj.hostname.endsWith(`.${domain}`)
+    );
+  } catch (e) {
+    // If URL parsing fails, check if it's a relative URL (which is allowed)
+    return url.startsWith('/');
+  }
+};
+
+// Fetch and convert a URL to a data URL to bypass CSP restrictions
+const fetchAndConvertToDataUrl = async (url: string): Promise<string> => {
+  try {
+    // Return early if the URL is already allowed by CSP
+    if (isAllowedByCsp(url)) {
+      return url;
+    }
+    
+    // Fetch the image using XMLHttpRequest (which doesn't trigger CSP connect-src)
+    return new Promise<string>((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open('GET', url, true);
+      xhr.responseType = 'blob';
+      
+      xhr.onload = function() {
+        if (this.status === 200) {
+          const reader = new FileReader();
+          reader.onloadend = function() {
+            resolve(reader.result as string);
+          };
+          reader.readAsDataURL(this.response);
+        } else {
+          reject(new Error(`Failed to load image: ${this.statusText}`));
+        }
+      };
+      
+      xhr.onerror = function() {
+        reject(new Error('Network error occurred'));
+      };
+      
+      xhr.send();
+    });
+  } catch (error) {
+    console.error('Error converting to data URL:', error);
+    return '/assets/placeholder-rank.png';
+  }
+};
+
 export function OrderModal({ isOpen, onClose }: OrderModalProps) {
   // State variables
   const [username, setUsername] = useState('');
@@ -109,9 +174,13 @@ export function OrderModal({ isOpen, onClose }: OrderModalProps) {
 
   // Add state for payment QR code
   const [paymentQrCode, setPaymentQrCode] = useState<string>("https://i.imgur.com/xmzqO4S.jpeg");
+  const [proxiedQrCode, setProxiedQrCode] = useState<string>("/assets/placeholder-payment.png");
 
   // Add error state for payment image
   const [paymentImageError, setPaymentImageError] = useState(false);
+
+  // State to track CSP-compliant image URLs for each rank
+  const [proxiedRankImages, setProxiedRankImages] = useState<Record<string, string>>({});
 
   // Load ranks from database on component mount
   useEffect(() => {
@@ -143,6 +212,35 @@ export function OrderModal({ isOpen, onClose }: OrderModalProps) {
         if (formattedRanks.length > 0 && !selectedRank) {
           setSelectedRank(formattedRanks[0].name);
         }
+        
+        // Process all rank images to be CSP-compliant
+        const imagePromises = formattedRanks.map(async (rank) => {
+          try {
+            // Only process if there's an image and it's not already CSP-compliant
+            if (rank.image && !isAllowedByCsp(rank.image)) {
+              const dataUrl = await fetchAndConvertToDataUrl(rank.image);
+              return { name: rank.name, url: dataUrl };
+            } else if (rank.image) {
+              // For already-compliant images, use as is
+              return { name: rank.name, url: rank.image };
+            }
+            return { name: rank.name, url: '/assets/placeholder-rank.png' };
+          } catch (error) {
+            console.error(`Failed to convert image for rank ${rank.name}:`, error);
+            return { name: rank.name, url: '/assets/placeholder-rank.png' };
+          }
+        });
+        
+        // Wait for all image processing to complete
+        const processedImages = await Promise.all(imagePromises);
+        
+        // Update proxied images state
+        const newProxiedImages: Record<string, string> = {};
+        processedImages.forEach(item => {
+          newProxiedImages[item.name] = item.url;
+        });
+        
+        setProxiedRankImages(newProxiedImages);
       } catch (error) {
         console.error('Failed to load ranks:', error);
         // Fallback to default ranks if database fetch fails
@@ -166,6 +264,13 @@ export function OrderModal({ isOpen, onClose }: OrderModalProps) {
             image: 'https://i.imgur.com/C4VE5b0.png'
           },
         ]);
+        
+        // Also create proxied versions for the fallback ranks
+        const fallbackProxied: Record<string, string> = {};
+        ['VIP', 'MVP', 'MVP+'].forEach(async (name) => {
+          fallbackProxied[name] = '/assets/placeholder-rank.png';
+        });
+        setProxiedRankImages(fallbackProxied);
       } finally {
         setRanksLoading(false);
       }
@@ -192,10 +297,23 @@ export function OrderModal({ isOpen, onClose }: OrderModalProps) {
         }
         
         if (data?.value?.qr_image_url) {
-          setPaymentQrCode(data.value.qr_image_url);
+          const qrImageUrl = data.value.qr_image_url;
+          setPaymentQrCode(qrImageUrl);
+          
+          // Convert the QR code to a data URL to comply with CSP
+          try {
+            const dataUrl = await fetchAndConvertToDataUrl(qrImageUrl);
+            setProxiedQrCode(dataUrl);
+            setPaymentImageError(false);
+          } catch (err) {
+            console.error('Failed to convert payment QR to data URL:', err);
+            setProxiedQrCode('/assets/placeholder-payment.png');
+            setPaymentImageError(true);
+          }
         }
       } catch (error) {
         console.error('Failed to load payment QR code:', error);
+        setPaymentImageError(true);
       }
     }
     
@@ -281,8 +399,8 @@ export function OrderModal({ isOpen, onClose }: OrderModalProps) {
   const handlePaymentImageError = useCallback(() => {
     console.error('Failed to load payment QR code image');
     setPaymentImageError(true);
-    // Fall back to default image
-    setPaymentQrCode("https://i.imgur.com/xmzqO4S.jpeg");
+    // Fall back to default placeholder image
+    setProxiedQrCode('/assets/placeholder-payment.png');
   }, []);
 
   // Early return if modal is not open
@@ -526,13 +644,36 @@ export function OrderModal({ isOpen, onClose }: OrderModalProps) {
               Select your platform and rank to proceed with the purchase
               {demoMode && <span className="ml-1 text-emerald-400">• Demo Mode</span>}
             </p>
+            
+            {/* Progress Indicator */}
+            <div className="flex justify-center mt-4">
+              <div className="flex items-center space-x-2 sm:space-x-4">
+                <div className="flex flex-col items-center">
+                  <div className="w-6 h-6 rounded-full bg-emerald-500 flex items-center justify-center text-xs text-white">1</div>
+                  <span className="text-xs mt-1 text-emerald-400">Select</span>
+                </div>
+                <div className="w-10 sm:w-16 h-[2px] bg-emerald-500"></div>
+                <div className="flex flex-col items-center">
+                  <div className="w-6 h-6 rounded-full bg-emerald-500/80 flex items-center justify-center text-xs text-white">2</div>
+                  <span className="text-xs mt-1 text-emerald-400/80">Pay</span>
+                </div>
+                <div className="w-10 sm:w-16 h-[2px] bg-emerald-500/60"></div>
+                <div className="flex flex-col items-center">
+                  <div className="w-6 h-6 rounded-full bg-emerald-500/60 flex items-center justify-center text-xs text-white">3</div>
+                  <span className="text-xs mt-1 text-emerald-400/60">Confirm</span>
+                </div>
+              </div>
+            </div>
           </div>
 
           {/* Order form */}
           {ranksLoading ? (
-            <div className="flex items-center justify-center p-8">
+            <div className="flex flex-col items-center justify-center p-8 space-y-4">
               <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-emerald-500"></div>
-              <span className="ml-3 text-white">Loading ranks...</span>
+              <span className="text-white">Loading ranks and prices...</span>
+              <p className="text-gray-400 text-xs text-center max-w-md">
+                Please wait while we retrieve the latest ranks and prices from our server. This usually takes just a moment.
+              </p>
             </div>
           ) : (
             <form onSubmit={handleSubmit} className="space-y-4 sm:space-y-6">
@@ -564,18 +705,46 @@ export function OrderModal({ isOpen, onClose }: OrderModalProps) {
                   <User size={16} className="text-emerald-400" />
                   Minecraft Username
                 </label>
-                <input
-                  type="text"
-                  value={username}
-                  onChange={(e) => setUsername(e.target.value)}
-                  className="w-full bg-gray-700/50 border border-gray-600 rounded-lg py-2 px-3 text-white focus:outline-none focus:ring-2 focus:ring-emerald-400 text-sm sm:text-base"
-                  required
-                  placeholder="Enter your Minecraft username"
-                  pattern="[a-zA-Z0-9_]{3,16}"
-                  title="Username must be 3-16 characters long and contain only letters, numbers, and underscores"
-                  maxLength={16}
-                  autoComplete="username"
-                />
+                <div className="relative">
+                  <input
+                    type="text"
+                    value={username}
+                    onChange={(e) => setUsername(e.target.value)}
+                    className={`w-full bg-gray-700/50 border ${
+                      username && !usernameRegex.test(username)
+                        ? 'border-red-500 focus:ring-red-500'
+                        : username && usernameRegex.test(username)
+                        ? 'border-emerald-500 focus:ring-emerald-500'
+                        : 'border-gray-600 focus:ring-emerald-400'
+                    } rounded-lg py-2 px-3 pl-9 text-white focus:outline-none focus:ring-2 text-sm sm:text-base`}
+                    required
+                    placeholder="Enter your Minecraft username"
+                    pattern="[a-zA-Z0-9_]{3,16}"
+                    title="Username must be 3-16 characters long and contain only letters, numbers, and underscores"
+                    maxLength={16}
+                    autoComplete="username"
+                  />
+                  <User 
+                    size={16} 
+                    className={`absolute left-3 top-1/2 transform -translate-y-1/2 
+                      ${username && !usernameRegex.test(username)
+                        ? 'text-red-500'
+                        : username && usernameRegex.test(username)
+                        ? 'text-emerald-500'
+                        : 'text-gray-400'
+                    }`} 
+                  />
+                </div>
+                {username && !usernameRegex.test(username) && (
+                  <p className="mt-1 text-xs text-red-400">
+                    Username must be 3-16 characters and contain only letters, numbers, and underscores.
+                  </p>
+                )}
+                {username && usernameRegex.test(username) && (
+                  <p className="mt-1 text-xs text-emerald-400">
+                    Valid Minecraft username format ✓
+                  </p>
+                )}
               </div>
 
               {/* Platform Selection */}
@@ -633,8 +802,11 @@ export function OrderModal({ isOpen, onClose }: OrderModalProps) {
                           {rank.discount && rank.discount > 0 && isActive ? (
                             <>
                               <span className="line-through text-gray-400 text-xs">${rank.price.toFixed(2)}</span>
-                              <span className="text-xs sm:text-sm">${getDiscountedPrice(rank.price, rank.discount)}</span>
-                              <span className="bg-emerald-600 text-white text-[10px] px-1 rounded-sm ml-1">-{rank.discount}%</span>
+                              <span className="text-xs sm:text-sm font-bold text-emerald-400">${getDiscountedPrice(rank.price, rank.discount)}</span>
+                              <div className="bg-emerald-600 text-white text-[10px] px-1 py-0.5 rounded-full ml-1 flex items-center">
+                                <PercentIcon size={10} className="mr-0.5" />
+                                {rank.discount}%
+                              </div>
                             </>
                           ) : (
                             <span className="text-xs sm:text-sm">${rank.price.toFixed(2)}</span>
@@ -655,11 +827,12 @@ export function OrderModal({ isOpen, onClose }: OrderModalProps) {
                   </h3>
                   <div className="flex justify-center">
                     <img 
-                      src={selectedRankOption.image} 
+                      src={proxiedRankImages[selectedRank] || '/assets/placeholder-rank.png'} 
                       alt={`${selectedRank} Kit Preview`}
                       className="w-auto h-auto max-w-full max-h-[250px] object-contain rounded-lg border border-gray-600"
                       loading="lazy"
                       onError={(e) => {
+                        console.error(`Failed to load image for ${selectedRank}`);
                         // Fallback image if the main one fails to load
                         e.currentTarget.src = '/assets/placeholder-rank.png';
                         e.currentTarget.onerror = null; // Prevent infinite loop
@@ -711,7 +884,7 @@ export function OrderModal({ isOpen, onClose }: OrderModalProps) {
                   <p className="text-gray-300 mb-3 text-sm sm:text-base">Scan the QR code below to pay:</p>
                   <div className="bg-white p-2 sm:p-4 rounded-lg inline-block">
                     <img 
-                      src={paymentQrCode} 
+                      src={proxiedQrCode} 
                       alt="Payment QR Code"
                       className="w-36 h-36 sm:w-48 sm:h-48 mx-auto"
                       loading="lazy"
@@ -769,17 +942,63 @@ export function OrderModal({ isOpen, onClose }: OrderModalProps) {
                     )}
                   </label>
                 </div>
+                
+                {paymentProof && (
+                  <div className="mt-3 bg-gray-700/50 rounded-lg p-3 border border-gray-600">
+                    <div className="flex items-center justify-between mb-2">
+                      <h4 className="text-sm font-medium text-emerald-400">Preview</h4>
+                      <button 
+                        type="button" 
+                        onClick={() => setPaymentProof(null)}
+                        className="text-xs text-gray-400 hover:text-red-400"
+                      >
+                        Remove
+                      </button>
+                    </div>
+                    <div className="flex justify-center bg-gray-800 rounded-lg overflow-hidden">
+                      <img 
+                        src={paymentProof ? URL.createObjectURL(paymentProof) : ''}
+                        alt="Payment proof preview" 
+                        className="max-h-40 object-contain"
+                      />
+                    </div>
+                    <div className="mt-2 text-xs text-gray-400 flex justify-between">
+                      <span>Size: {paymentProof ? (paymentProof.size / 1024 / 1024).toFixed(2) : 0} MB</span>
+                      <span>Type: {paymentProof?.type || ''}</span>
+                    </div>
+                    {paymentProof && paymentProof.size > MAX_FILE_SIZE && (
+                      <p className="mt-1 text-xs text-red-400">
+                        File size exceeds the 5MB limit. Please choose a smaller file.
+                      </p>
+                    )}
+                  </div>
+                )}
               </div>
 
               {/* Submit Button */}
               <button
                 type="submit"
                 disabled={loading}
-                className="w-full bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-600 hover:to-emerald-700 text-white rounded-lg py-3 px-4 transition duration-300 disabled:opacity-50 transform hover:scale-[1.02] text-sm sm:text-base font-medium mt-2"
+                className="w-full bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-600 hover:to-emerald-700 text-white rounded-lg py-3 px-4 transition duration-300 disabled:opacity-50 transform hover:scale-[1.02] text-sm sm:text-base font-medium mt-2 flex items-center justify-center"
                 aria-busy={loading}
               >
-                {loading ? 'Processing...' : 'Submit Order'}
+                {loading ? (
+                  <>
+                    <div className="animate-spin rounded-full h-5 w-5 border-2 border-white border-t-transparent mr-2"></div>
+                    Processing Order...
+                  </>
+                ) : (
+                  <>
+                    <CreditCard size={18} className="mr-2" />
+                    Complete Purchase
+                  </>
+                )}
               </button>
+              
+              {/* Terms and Conditions */}
+              <p className="text-xs text-gray-400 text-center mt-2">
+                By clicking "Complete Purchase", you agree to our Terms of Service and confirm that all provided information is correct.
+              </p>
             </form>
           )}
         </div>
