@@ -158,7 +158,7 @@ export function Receipt({ isOpen, onClose, order, rankDetails }: ReceiptProps) {
                     loading="lazy"
                     onError={(e) => {
                       // Fallback to placeholder if image fails to load
-                      e.currentTarget.src = 'https://i.imgur.com/placeholder.png';
+                      e.currentTarget.src = '/assets/placeholder-rank.png';
                       e.currentTarget.onerror = null; // Prevent infinite loop
                     }}
                   />
@@ -202,10 +202,11 @@ export function Receipt({ isOpen, onClose, order, rankDetails }: ReceiptProps) {
                     <img 
                       src={paymentProofUrl} 
                       alt="Payment Proof" 
-                      className="max-h-36 w-auto object-contain mx-auto"
+                      className="max-h-48 w-auto object-contain mx-auto"
                       loading="lazy"
                       onError={(e) => {
-                        e.currentTarget.src = 'https://i.imgur.com/placeholder.png';
+                        console.error("Failed to load payment proof image:", paymentProofUrl);
+                        e.currentTarget.src = '/assets/placeholder-payment.png';
                         e.currentTarget.onerror = null;
                       }}
                     />

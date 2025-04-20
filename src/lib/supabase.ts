@@ -63,7 +63,9 @@ function customFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Resp
 
 // Utility function to get public URL for storage items
 export const getPublicStorageUrl = (bucket: string, path: string): string => {
-  return `${supabaseUrl}/storage/v1/object/public/${bucket}/${path}`;
+  // Ensure path doesn't start with a slash
+  const cleanPath = path.startsWith('/') ? path.slice(1) : path;
+  return `${supabaseUrl}/storage/v1/object/public/${bucket}/${cleanPath}`;
 };
 
 // Export connection status checker for app health monitoring
