@@ -1,7 +1,8 @@
-import React, { useRef, useCallback, useMemo } from 'react';
+import React, { useRef, useCallback, useMemo, useState, useEffect } from 'react';
 import { Download, X, Check, Info, User, Calendar, CreditCard, Shield, Printer } from 'lucide-react';
 import { Order, RankOption } from '../types';
 import { getPublicStorageUrl } from '../lib/supabase';
+import { proxyImage } from '../lib/imageProxy';
 
 interface ReceiptProps {
   isOpen: boolean;
@@ -12,6 +13,8 @@ interface ReceiptProps {
 
 export function Receipt({ isOpen, onClose, order, rankDetails }: ReceiptProps) {
   const receiptRef = useRef<HTMLDivElement>(null);
+  const [proxyPaymentUrl, setProxyPaymentUrl] = useState<string>('/assets/placeholder-payment.png');
+  const [isImageLoading, setIsImageLoading] = useState(true);
 
   // Format date for receipt - memoize to avoid recalculation
   const formattedDate = useMemo(() => {
@@ -43,6 +46,25 @@ export function Receipt({ isOpen, onClose, order, rankDetails }: ReceiptProps) {
     // Otherwise, construct URL from Supabase storage
     return getPublicStorageUrl('payment-proofs', order.payment_proof);
   }, [order.payment_proof]);
+
+  // Proxy the payment proof image to avoid CSP issues
+  useEffect(() => {
+    if (!paymentProofUrl) return;
+    
+    setIsImageLoading(true);
+    
+    // Use the image proxy to convert to data URL
+    proxyImage(paymentProofUrl)
+      .then(dataUrl => {
+        setProxyPaymentUrl(dataUrl);
+        setIsImageLoading(false);
+      })
+      .catch(error => {
+        console.error('Failed to proxy payment proof image:', error);
+        setProxyPaymentUrl('/assets/placeholder-payment.png');
+        setIsImageLoading(false);
+      });
+  }, [paymentProofUrl]);
 
   // Handle printing the receipt
   const handlePrint = useCallback(() => {
@@ -199,17 +221,18 @@ export function Receipt({ isOpen, onClose, order, rankDetails }: ReceiptProps) {
                 </h4>
                 <div className="flex justify-center">
                   <div className="bg-gray-100 border border-gray-200 rounded-lg p-2 max-w-xs">
-                    <img 
-                      src={paymentProofUrl} 
-                      alt="Payment Proof" 
-                      className="max-h-48 w-auto object-contain mx-auto"
-                      loading="lazy"
-                      onError={(e) => {
-                        console.error("Failed to load payment proof image:", paymentProofUrl);
-                        e.currentTarget.src = '/assets/placeholder-payment.png';
-                        e.currentTarget.onerror = null;
-                      }}
-                    />
+                    {isImageLoading ? (
+                      <div className="h-48 flex items-center justify-center">
+                        <div className="animate-pulse rounded-lg bg-gray-200 h-32 w-32"></div>
+                      </div>
+                    ) : (
+                      <img 
+                        src={proxyPaymentUrl} 
+                        alt="Payment Proof" 
+                        className="max-h-48 w-auto object-contain mx-auto"
+                        loading="lazy"
+                      />
+                    )}
                   </div>
                 </div>
               </div>
