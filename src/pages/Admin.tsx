@@ -56,6 +56,7 @@ const Admin = () => {
   const [selectedGradient, setSelectedGradient] = useState<string | null>(null);
   const [autoRefreshEnabled, setAutoRefreshEnabled] = useState(true);
   const [lastUpdateTime, setLastUpdateTime] = useState<Date>(new Date());
+  const [orderStatusMap, setOrderStatusMap] = useState<Record<string, string>>({});
 
   // Check authentication status on component mount
   useEffect(() => {
@@ -78,63 +79,121 @@ const Admin = () => {
           // Check for new orders since last check
           const lastOrderTime = realtimeNotifications[0]?.timestamp || new Date().toISOString();
           
-          // Fetch any new orders
-          const { data: newOrders, error } = await supabase
+          // Fetch all recent orders instead of just new ones
+          // This allows us to detect status changes
+          const { data: allOrders, error } = await supabase
             .from('orders')
             .select('*')
-            .gt('created_at', lastOrderTime)
-            .order('created_at', { ascending: false });
+            .order('created_at', { ascending: false })
+            .limit(50); // Limit to recent orders for performance
             
           if (error) throw error;
           
-          if (newOrders && newOrders.length > 0) {
-            // Add to notifications
-            const updatedNotifications = newOrders.map(newOrder => ({
-              id: newOrder.id, 
-              type: 'new_order', 
-              message: `New order #${newOrder.id.substring(0, 8)} (${newOrder.status})`,
-              timestamp: newOrder.created_at,
-              data: newOrder
-            }));
+          if (allOrders && allOrders.length > 0) {
+            // First, detect new orders by filtering out ones we've seen
+            const newOrders = allOrders.filter(order => 
+              !orderStatusMap[order.id]
+            );
             
-            setRealtimeNotifications(prev => [
-              ...updatedNotifications,
-              ...prev.slice(0, Math.max(0, 10 - updatedNotifications.length))
-            ]);
+            // Then, detect status changes by comparing with our stored statuses
+            const statusChanges = allOrders.filter(order => 
+              orderStatusMap[order.id] && // We've seen this order before
+              orderStatusMap[order.id] !== order.status // Status has changed
+            );
             
-            // Increment realtime order counter
-            setRealtimeOrderCount(prev => prev + newOrders.length);
+            // Update our status map with all current statuses
+            const updatedStatusMap = { ...orderStatusMap };
+            allOrders.forEach(order => {
+              updatedStatusMap[order.id] = order.status;
+            });
+            setOrderStatusMap(updatedStatusMap);
             
-            // Update stats if they exist
-            if (orderStats) {
-              setOrderStats((prev: {
-                total_orders: number;
-                pending_orders: number;
-                [key: string]: any;
-              }) => ({
-                ...prev,
-                total_orders: prev.total_orders + newOrders.length,
-                pending_orders: prev.pending_orders + newOrders.filter(o => o.status === 'pending').length
+            // Handle new orders
+            if (newOrders.length > 0) {
+              // Add to notifications
+              const newNotifications = newOrders.map(newOrder => ({
+                id: newOrder.id, 
+                type: 'new_order', 
+                message: `New order #${newOrder.id.substring(0, 8)} (${newOrder.status})`,
+                timestamp: newOrder.created_at,
+                data: newOrder
               }));
+              
+              setRealtimeNotifications(prev => [
+                ...newNotifications,
+                ...prev.slice(0, Math.max(0, 10 - newNotifications.length))
+              ]);
+              
+              // Increment realtime order counter
+              setRealtimeOrderCount(prev => prev + newOrders.length);
+              
+              // Update stats if they exist
+              if (orderStats) {
+                setOrderStats((prev: {
+                  total_orders: number;
+                  pending_orders: number;
+                  [key: string]: any;
+                }) => ({
+                  ...prev,
+                  total_orders: prev.total_orders + newOrders.length,
+                  pending_orders: prev.pending_orders + newOrders.filter(o => o.status === 'pending').length
+                }));
+              }
+              
+              // Show toast notification
+              if (newOrders.length === 1) {
+                toast.success('New order received!', {
+                  icon: '🛒',
+                  duration: 5000,
+                });
+              } else if (newOrders.length > 1) {
+                toast.success(`${newOrders.length} new orders received!`, {
+                  icon: '🛒',
+                  duration: 5000,
+                });
+              }
             }
             
-            // Show toast notification
-            if (newOrders.length === 1) {
-              toast.success('New order received!', {
-                icon: '🛒',
-                duration: 5000,
-              });
-            } else if (newOrders.length > 1) {
-              toast.success(`${newOrders.length} new orders received!`, {
-                icon: '🛒',
-                duration: 5000,
-              });
+            // Handle status changes
+            if (statusChanges.length > 0) {
+              // Add to notifications
+              const statusNotifications = statusChanges.map(changedOrder => ({
+                id: changedOrder.id + '-' + changedOrder.status, // Make unique ID
+                type: 'updated_order', 
+                message: `Order #${changedOrder.id.substring(0, 8)} updated to ${changedOrder.status}`,
+                timestamp: currentPollTime, // Use current time since we don't have updated_at
+                data: changedOrder
+              }));
+              
+              setRealtimeNotifications(prev => [
+                ...statusNotifications,
+                ...prev.slice(0, Math.max(0, 10 - statusNotifications.length))
+              ]);
+              
+              // Update order stats based on status changes
+              if (orderStats && statusChanges.some(order => ['completed', 'rejected', 'pending'].includes(order.status))) {
+                // We need to recalculate the stats since statuses changed
+                loadOrderStats();
+              }
+              
+              // Show toast for status changes
+              if (statusChanges.length === 1) {
+                const order = statusChanges[0];
+                const statusColor = order.status === 'completed' ? '✅' : 
+                                    order.status === 'rejected' ? '❌' : '⏳';
+                toast.success(`Order #${order.id.substring(0, 8)} ${statusColor} ${order.status}`, {
+                  duration: 5000,
+                });
+              } else if (statusChanges.length > 1) {
+                toast.success(`${statusChanges.length} orders updated`, {
+                  duration: 5000,
+                });
+              }
             }
+            
+            // Update ordersData state with all fetched orders
+            setOrdersData(allOrders);
           }
-          
-          // Instead of checking for updates based on updated_at (which doesn't exist),
-          // we'll just check all orders and handle updates separately if needed
-          // We could implement status tracking in the future if needed
           
           // Poll for payment settings changes
           const { data: settingsData, error: settingsError } = await supabase
@@ -158,7 +217,7 @@ const Admin = () => {
     return () => {
       if (pollInterval) clearInterval(pollInterval);
     };
-  }, [isAdmin, orderStats, realtimeNotifications, paymentImageUrl]);
+  }, [isAdmin, orderStats, realtimeNotifications, paymentImageUrl, orderStatusMap]);
 
   // Load gradient presets from local data instead of external API
   const loadGradientPresets = async () => {
