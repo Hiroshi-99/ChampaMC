@@ -96,28 +96,104 @@ const Admin = () => {
     }
   }, [isAdmin]);
 
-  // Load gradient presets from BirdFlop API
+  // Load gradient presets from local data instead of external API
   const loadGradientPresets = async () => {
     setLoadingGradients(true);
     try {
-      const response = await fetch('https://www.birdflop.com/api/v2/gradients');
-      if (!response.ok) throw new Error('Failed to fetch gradient presets');
+      // Instead of fetching from external API that's blocked by CSP,
+      // use local predefined gradients
+      const localPresets: GradientPreset[] = [
+        {
+          id: 'blue-purple',
+          name: 'Blue to Purple',
+          startColor: '#3b82f6',
+          endColor: '#8b5cf6',
+          preview: 'linear-gradient(to right, #3b82f6, #8b5cf6)'
+        },
+        {
+          id: 'green-teal',
+          name: 'Green to Teal',
+          startColor: '#10b981',
+          endColor: '#0d9488',
+          preview: 'linear-gradient(to right, #10b981, #0d9488)'
+        },
+        {
+          id: 'orange-red',
+          name: 'Orange to Red',
+          startColor: '#f97316',
+          endColor: '#ef4444',
+          preview: 'linear-gradient(to right, #f97316, #ef4444)'
+        },
+        {
+          id: 'yellow-amber',
+          name: 'Yellow to Amber',
+          startColor: '#eab308',
+          endColor: '#f59e0b',
+          preview: 'linear-gradient(to right, #eab308, #f59e0b)'
+        },
+        {
+          id: 'pink-rose',
+          name: 'Pink to Rose',
+          startColor: '#ec4899',
+          endColor: '#e11d48',
+          preview: 'linear-gradient(to right, #ec4899, #e11d48)'
+        },
+        {
+          id: 'indigo-violet',
+          name: 'Indigo to Violet',
+          startColor: '#6366f1', 
+          endColor: '#7c3aed',
+          preview: 'linear-gradient(to right, #6366f1, #7c3aed)'
+        },
+        {
+          id: 'cyan-sky',
+          name: 'Cyan to Sky',
+          startColor: '#06b6d4',
+          endColor: '#0ea5e9',
+          preview: 'linear-gradient(to right, #06b6d4, #0ea5e9)'
+        },
+        {
+          id: 'emerald-green',
+          name: 'Emerald to Green',
+          startColor: '#10b981',
+          endColor: '#22c55e',
+          preview: 'linear-gradient(to right, #10b981, #22c55e)'
+        },
+        {
+          id: 'lime-emerald',
+          name: 'Lime to Emerald',
+          startColor: '#84cc16',
+          endColor: '#10b981',
+          preview: 'linear-gradient(to right, #84cc16, #10b981)'
+        },
+        {
+          id: 'slate-gray',
+          name: 'Slate to Gray',
+          startColor: '#64748b',
+          endColor: '#4b5563',
+          preview: 'linear-gradient(to right, #64748b, #4b5563)'
+        },
+        {
+          id: 'purple-fuchsia',
+          name: 'Purple to Fuchsia',
+          startColor: '#a855f7',
+          endColor: '#d946ef',
+          preview: 'linear-gradient(to right, #a855f7, #d946ef)'
+        },
+        {
+          id: 'amber-red',
+          name: 'Amber to Red',
+          startColor: '#f59e0b',
+          endColor: '#ef4444',
+          preview: 'linear-gradient(to right, #f59e0b, #ef4444)'
+        }
+      ];
       
-      const data = await response.json();
-      
-      // Transform the data into our format
-      const presets: GradientPreset[] = data.map((gradient: any) => ({
-        id: gradient.id || `gradient-${Math.random().toString(36).substring(2, 9)}`,
-        name: gradient.name || 'Unnamed Gradient',
-        startColor: gradient.startColor || '#000000',
-        endColor: gradient.endColor || '#ffffff',
-        preview: gradient.preview || `linear-gradient(to right, ${gradient.startColor}, ${gradient.endColor})`
-      }));
-      
-      setGradientPresets(presets);
+      setGradientPresets(localPresets);
+      console.log('Loaded local gradient presets');
     } catch (error) {
       console.error('Error loading gradient presets:', error);
-      // Add some default presets if API fails
+      // Add basic default presets as fallback
       setGradientPresets([
         {
           id: 'default-1',
