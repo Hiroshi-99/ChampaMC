@@ -127,9 +127,16 @@ const Admin = () => {
   const handleUpdateRank = async (id: string, updates: Partial<RankOption>) => {
     setSaving(true);
     try {
+      // Convert from our component format to database format (image → image_url)
+      const dbUpdates = { ...updates };
+      if (dbUpdates.image !== undefined) {
+        dbUpdates.image_url = dbUpdates.image;
+        delete dbUpdates.image;
+      }
+
       const { error } = await supabase
         .from('ranks')
-        .update(updates)
+        .update(dbUpdates)
         .eq('id', id);
       
       if (error) throw error;
@@ -149,7 +156,7 @@ const Admin = () => {
       name: 'NEW RANK',
       price: 5.00,
       color: 'from-gray-500 to-gray-600',
-      image: 'https://i.imgur.com/placeholder.png',
+      image_url: 'https://i.imgur.com/placeholder.png',
       description: 'New rank description'
     };
 
@@ -218,7 +225,7 @@ const Admin = () => {
         .getPublicUrl(filePath);
       
       if (data) {
-        // Update rank with new image URL
+        // Update rank with new image URL - convert to image_url field
         await handleUpdateRank(id, { image: data.publicUrl });
       }
     } catch (error: any) {

@@ -96,7 +96,7 @@ export function OrderModal({ isOpen, onClose }: OrderModalProps) {
           name: rank.name,
           price: rank.price,
           color: rank.color,
-          image: rank.image_url || rank.image,
+          image: rank.image_url,
           description: rank.description
         }));
         
