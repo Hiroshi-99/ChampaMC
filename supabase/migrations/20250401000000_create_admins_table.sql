@@ -7,37 +7,37 @@ CREATE TABLE IF NOT EXISTS public.admins (
 );
 
 -- Enable RLS on admins table
-ALTER TABLE admins ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.admins ENABLE ROW LEVEL SECURITY;
 
 -- Admins can read their own records
 CREATE POLICY "Admins can read own records"
-  ON admins
+  ON public.admins
   FOR SELECT
   TO authenticated
   USING (auth.uid() = user_id);
 
 -- Update orders policies to allow admin access
 CREATE POLICY "Admins can read all orders"
-  ON orders
+  ON public.orders
   FOR SELECT
   TO authenticated
   USING (
     auth.uid() IN (
-      SELECT user_id FROM admins
+      SELECT user_id FROM public.admins
     )
   );
 
 CREATE POLICY "Admins can update all orders"
-  ON orders
+  ON public.orders
   FOR UPDATE
   TO authenticated
   USING (
     auth.uid() IN (
-      SELECT user_id FROM admins
+      SELECT user_id FROM public.admins
     )
   )
   WITH CHECK (
     auth.uid() IN (
-      SELECT user_id FROM admins
+      SELECT user_id FROM public.admins
     )
   ); 
