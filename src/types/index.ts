@@ -28,6 +28,8 @@ export interface RankOption {
   startColor?: string;
   endColor?: string;
   gradientCss?: string;
+  gradient_preset?: string;
+  custom_gradient?: string;
 }
 
 // Discord webhook types

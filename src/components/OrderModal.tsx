@@ -93,7 +93,7 @@ const isDiscountActive = (rank: RankOption): boolean => {
 };
 
 // Helper function to determine if a URL is allowed by CSP img-src directive
-const isAllowedByCsp = (url: string): boolean => {
+const isAllowedByCsp = (url: string | undefined): boolean => {
   if (!url) return false;
   
   try {
@@ -120,8 +120,13 @@ const isAllowedByCsp = (url: string): boolean => {
 };
 
 // Fetch and convert a URL to a data URL to bypass CSP restrictions
-const fetchAndConvertToDataUrl = async (url: string): Promise<string> => {
+const fetchAndConvertToDataUrl = async (url: string | undefined): Promise<string> => {
   try {
+    // Return placeholder if URL is undefined
+    if (!url) {
+      return '/assets/placeholder-rank.png';
+    }
+    
     // Return early if the URL is already allowed by CSP
     if (isAllowedByCsp(url)) {
       return url;
@@ -157,23 +162,25 @@ const fetchAndConvertToDataUrl = async (url: string): Promise<string> => {
   }
 };
 
-// Add a helper function to generate gradient style from color string
-const getGradientStyle = (color: string): React.CSSProperties => {
-  if (!color) return { background: 'linear-gradient(to right, #4b5563, #6b7280)' }; // Default gradient
-  
-  // Check if color is a comma-separated string (start,end format)
-  if (color.includes(',')) {
-    const [startColor, endColor] = color.split(',');
-    return { background: `linear-gradient(to right, ${startColor}, ${endColor})` };
+// Add helper function to handle gradient styling
+const getGradientStyle = (rank: RankOption): string => {
+  // If rank has a custom gradient, use it
+  if (rank.custom_gradient) {
+    return rank.custom_gradient;
   }
   
-  // If it's Tailwind classes, return empty object (will use className instead)
-  if (color.includes('from-') && color.includes('to-')) {
-    return {};
+  // Use the preset gradient if available
+  if (rank.gradient_preset) {
+    return rank.gradient_preset;
   }
   
-  // Fallback to a solid color background
-  return { background: color };
+  // Use gradientCss if available
+  if (rank.gradientCss) {
+    return rank.gradientCss;
+  }
+  
+  // Fall back to the color property with default gradient direction
+  return `bg-gradient-to-r ${rank.color || 'from-emerald-500 to-emerald-600'}`;
 };
 
 export function OrderModal({ isOpen, onClose }: OrderModalProps) {
@@ -223,7 +230,9 @@ export function OrderModal({ isOpen, onClose }: OrderModalProps) {
           image: rank.image_url || `https://i.imgur.com/placeholder.png`, // Ensure fallback
           description: rank.description,
           discount: rank.discount,
-          discount_expires_at: rank.discount_expires_at
+          discount_expires_at: rank.discount_expires_at,
+          gradient_preset: rank.gradient_preset,
+          custom_gradient: rank.custom_gradient
         }));
         
         setRanks(formattedRanks);
@@ -814,6 +823,7 @@ export function OrderModal({ isOpen, onClose }: OrderModalProps) {
                 <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
                   {ranks.map((rank) => {
                     const isActive = isDiscountActive(rank);
+                    const gradientClass = getGradientStyle(rank);
                     return (
                       <button
                         key={rank.name}
@@ -821,10 +831,9 @@ export function OrderModal({ isOpen, onClose }: OrderModalProps) {
                         onClick={() => handleRankSelect(rank.name)}
                         className={`py-2 sm:py-3 px-2 sm:px-3 rounded-lg border transition-all transform hover:scale-[1.02] text-sm ${
                           selectedRank === rank.name
-                            ? rank.color.includes('from-') ? `bg-gradient-to-r ${rank.color} text-white border-transparent` : 'text-white border-transparent'
+                            ? gradientClass + ' text-white border-transparent'
                             : 'bg-gray-700/50 text-gray-300 border-gray-600 hover:bg-gray-600/50'
                         }`}
-                        style={selectedRank === rank.name ? getGradientStyle(rank.color) : undefined}
                       >
                         <div className="font-medium truncate">{rank.name}</div>
                         <div className="flex justify-center items-center gap-1">
@@ -871,6 +880,13 @@ export function OrderModal({ isOpen, onClose }: OrderModalProps) {
                   {selectedRankOption.description && (
                     <p className="mt-3 text-gray-300 text-sm">{selectedRankOption.description}</p>
                   )}
+                  
+                  {/* Add badge with rank colors */}
+                  <div className="mt-3 flex justify-center">
+                    <div className={`${getGradientStyle(selectedRankOption)} text-white text-xs font-bold rounded-full px-3 py-1`}>
+                      {selectedRank} Rank Colors
+                    </div>
+                  </div>
                   
                   {/* Show discount badge if applicable */}
                   {selectedRankOption && isDiscountActive(selectedRankOption) && selectedRankOption.discount && selectedRankOption.discount > 0 && (
