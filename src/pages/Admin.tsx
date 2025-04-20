@@ -1,10 +1,11 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
 import { RankOption } from '../types';
-import { Shield, DollarSign, Image, Save, Trash, RefreshCw, Plus, LogOut, Home, Lock, Tag, PercentIcon, Calendar, Clock, Check, Info, Settings, Upload, Eye, CreditCard, Bell } from 'lucide-react';
+import { Shield, DollarSign, Image, Save, Trash, RefreshCw, Plus, LogOut, Home, Lock, Tag, PercentIcon, Calendar, Clock, Check, Info, Settings, Upload, Eye, CreditCard, Bell, Palette } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useNavigate, Link } from 'react-router-dom';
 import { proxyImage } from '../lib/imageProxy';
+import './AdminStyles.css'; // Import the CSS for custom animations
 
 // Add the Order interface
 interface Order {
@@ -14,6 +15,15 @@ interface Order {
   status: string;
   total: number;
   [key: string]: any;
+}
+
+// Add BirdFlop gradient interface
+interface GradientPreset {
+  id: string;
+  name: string;
+  startColor: string;
+  endColor: string;
+  preview: string;
 }
 
 // Enhanced Admin UI with Discount Management
@@ -41,11 +51,139 @@ const Admin = () => {
   const [realtimeOrderCount, setRealtimeOrderCount] = useState(0);
   const [user, setUser] = useState<any>(null);
   const [ordersData, setOrdersData] = useState<Order[] | null>(null);
+  const [gradientPresets, setGradientPresets] = useState<GradientPreset[]>([]);
+  const [loadingGradients, setLoadingGradients] = useState(false);
+  const [selectedGradient, setSelectedGradient] = useState<string | null>(null);
+  const [autoRefreshEnabled, setAutoRefreshEnabled] = useState(true);
+  const [lastUpdateTime, setLastUpdateTime] = useState<Date>(new Date());
 
   // Check authentication status on component mount
   useEffect(() => {
     checkAuth();
+    loadGradientPresets();
   }, []);
+
+  // Set up real-time auto-refresh for data
+  useEffect(() => {
+    let intervalId: NodeJS.Timeout | null = null;
+    
+    if (isAdmin && autoRefreshEnabled) {
+      // Auto-refresh data every 30 seconds
+      intervalId = setInterval(() => {
+        refreshAllData();
+        setLastUpdateTime(new Date());
+      }, 30000); // 30 seconds
+    }
+    
+    return () => {
+      if (intervalId) clearInterval(intervalId);
+    };
+  }, [isAdmin, autoRefreshEnabled]);
+
+  // Function to refresh all data
+  const refreshAllData = useCallback(async () => {
+    if (!isAdmin) return;
+    
+    try {
+      await Promise.all([
+        loadRanks(),
+        loadOrderStats(),
+        loadPaymentDetails()
+      ]);
+      console.log('Data refreshed automatically at', new Date().toLocaleTimeString());
+    } catch (error) {
+      console.error('Error in auto-refresh:', error);
+    }
+  }, [isAdmin]);
+
+  // Load gradient presets from BirdFlop API
+  const loadGradientPresets = async () => {
+    setLoadingGradients(true);
+    try {
+      const response = await fetch('https://www.birdflop.com/api/v2/gradients');
+      if (!response.ok) throw new Error('Failed to fetch gradient presets');
+      
+      const data = await response.json();
+      
+      // Transform the data into our format
+      const presets: GradientPreset[] = data.map((gradient: any) => ({
+        id: gradient.id || `gradient-${Math.random().toString(36).substring(2, 9)}`,
+        name: gradient.name || 'Unnamed Gradient',
+        startColor: gradient.startColor || '#000000',
+        endColor: gradient.endColor || '#ffffff',
+        preview: gradient.preview || `linear-gradient(to right, ${gradient.startColor}, ${gradient.endColor})`
+      }));
+      
+      setGradientPresets(presets);
+    } catch (error) {
+      console.error('Error loading gradient presets:', error);
+      // Add some default presets if API fails
+      setGradientPresets([
+        {
+          id: 'default-1',
+          name: 'Blue to Purple',
+          startColor: '#3b82f6',
+          endColor: '#8b5cf6',
+          preview: 'linear-gradient(to right, #3b82f6, #8b5cf6)'
+        },
+        {
+          id: 'default-2',
+          name: 'Green to Teal',
+          startColor: '#10b981',
+          endColor: '#0d9488',
+          preview: 'linear-gradient(to right, #10b981, #0d9488)'
+        },
+        {
+          id: 'default-3',
+          name: 'Orange to Red',
+          startColor: '#f97316',
+          endColor: '#ef4444',
+          preview: 'linear-gradient(to right, #f97316, #ef4444)'
+        }
+      ]);
+    } finally {
+      setLoadingGradients(false);
+    }
+  };
+
+  // Convert TailwindCSS gradient class to hex gradient
+  const tailwindToHexGradient = (tailwindClass: string): { startColor: string, endColor: string } => {
+    // Extract color names from tailwind class (e.g. "from-blue-500 to-purple-600")
+    const fromMatch = tailwindClass.match(/from-([a-z]+-[0-9]+)/);
+    const toMatch = tailwindClass.match(/to-([a-z]+-[0-9]+)/);
+    
+    // Default colors if we can't extract from the class
+    let startColor = '#3b82f6'; // blue-500
+    let endColor = '#8b5cf6';   // purple-500
+    
+    // Map of some common Tailwind colors to hex
+    const colorMap: {[key: string]: string} = {
+      'gray-500': '#6b7280',
+      'gray-600': '#4b5563',
+      'gray-700': '#374151',
+      'blue-500': '#3b82f6',
+      'purple-500': '#8b5cf6',
+      'green-500': '#10b981',
+      'red-500': '#ef4444',
+      'emerald-500': '#10b981',
+      'emerald-600': '#059669',
+    };
+    
+    if (fromMatch && fromMatch[1] && colorMap[fromMatch[1]]) {
+      startColor = colorMap[fromMatch[1]];
+    }
+    
+    if (toMatch && toMatch[1] && colorMap[toMatch[1]]) {
+      endColor = colorMap[toMatch[1]];
+    }
+    
+    return { startColor, endColor };
+  };
+  
+  // Generate gradient CSS from hex colors
+  const generateGradientCss = (startColor: string, endColor: string): string => {
+    return `linear-gradient(to right, ${startColor}, ${endColor})`;
+  };
 
   // Set up real-time listeners for orders when authenticated as admin
   useEffect(() => {
@@ -363,13 +501,35 @@ const Admin = () => {
       if (error) throw error;
       
       // Add image field for component consistency and handle discount expiry
-      const ranksWithFormattedImages = data.map(rank => ({
-        ...rank,
-        image: rank.image_url, // Add image field that points to image_url for component use
-        discount: rank.discount || 0, // Ensure discount has a default value
-        is_discount_active: isDiscountActive(rank.discount, rank.discount_expires_at),
-        discount_days_remaining: getDaysRemaining(rank.discount_expires_at)
-      }));
+      const ranksWithFormattedImages = data.map(rank => {
+        // Convert from Tailwind class to hex gradient if needed
+        let startColor = '#000000';
+        let endColor = '#ffffff';
+        
+        if (rank.color && rank.color.includes('from-')) {
+          const hexGradient = tailwindToHexGradient(rank.color);
+          startColor = hexGradient.startColor;
+          endColor = hexGradient.endColor;
+        } else if (rank.color && rank.color.includes('#')) {
+          // Parse existing hex gradient if it exists
+          const parts = rank.color.split(',');
+          if (parts.length === 2) {
+            startColor = parts[0].trim();
+            endColor = parts[1].trim();
+          }
+        }
+        
+        return {
+          ...rank,
+          image: rank.image_url, // Add image field that points to image_url for component use
+          discount: rank.discount || 0, // Ensure discount has a default value
+          is_discount_active: isDiscountActive(rank.discount, rank.discount_expires_at),
+          discount_days_remaining: getDaysRemaining(rank.discount_expires_at),
+          startColor, // Add hex colors
+          endColor,
+          gradientCss: generateGradientCss(startColor, endColor)
+        };
+      });
       
       setRanks(ranksWithFormattedImages || []);
     } catch (error: any) {
@@ -390,6 +550,15 @@ const Admin = () => {
         dbUpdates.image_url = dbUpdates.image;
         delete dbUpdates.image;
       }
+      
+      // Handle gradient colors if they exist
+      if (dbUpdates.startColor && dbUpdates.endColor) {
+        // Store as a simple comma-separated string
+        dbUpdates.color = `${dbUpdates.startColor},${dbUpdates.endColor}`;
+        delete dbUpdates.startColor;
+        delete dbUpdates.endColor;
+        delete dbUpdates.gradientCss;
+      }
 
       const { error } = await supabase
         .from('ranks')
@@ -409,11 +578,15 @@ const Admin = () => {
 
   // Handle adding a new rank
   const handleAddRank = async () => {
+    // Default gradient
+    const startColor = '#6b7280'; // gray-500
+    const endColor = '#4b5563';   // gray-600
+    
     const newRank = {
       name: 'NEW RANK',
       price: 5.00,
       discount: 0,
-      color: 'from-gray-500 to-gray-600',
+      color: `${startColor},${endColor}`, // Store as hex values
       image_url: 'https://i.imgur.com/placeholder.png',
       description: 'New rank description'
     };
@@ -539,6 +712,27 @@ const Admin = () => {
     }
   };
 
+  // Apply a gradient preset to a rank
+  const applyGradientPreset = (rankId: string, presetId: string) => {
+    const preset = gradientPresets.find(p => p.id === presetId);
+    if (!preset) return;
+    
+    setRanks(ranks.map(rank => 
+      rank.id === rankId ? {
+        ...rank,
+        startColor: preset.startColor,
+        endColor: preset.endColor,
+        gradientCss: generateGradientCss(preset.startColor, preset.endColor)
+      } : rank
+    ));
+    
+    // Auto-save the gradient
+    handleUpdateRank(rankId, {
+      startColor: preset.startColor,
+      endColor: preset.endColor
+    });
+  };
+
   if (isAuthLoading) {
     return (
       <div className="min-h-screen bg-gray-900 flex items-center justify-center">
@@ -618,6 +812,24 @@ const Admin = () => {
         <div className="max-w-7xl mx-auto flex justify-between items-center">
           <h1 className="text-2xl font-bold">Champa Admin</h1>
           <div className="flex items-center space-x-4">
+            {/* Auto-refresh toggle */}
+            <div className="flex items-center mr-2">
+              <button
+                onClick={() => setAutoRefreshEnabled(!autoRefreshEnabled)}
+                className={`p-2 rounded-full transition-colors relative ${
+                  autoRefreshEnabled ? 'text-emerald-400 hover:bg-emerald-900/30' : 'text-gray-400 hover:bg-gray-700'
+                }`}
+                title={autoRefreshEnabled ? "Auto-refresh is enabled" : "Auto-refresh is disabled"}
+              >
+                <RefreshCw size={18} className={autoRefreshEnabled ? "animate-spin-slow" : ""} />
+              </button>
+              <span className="text-xs text-gray-400 ml-1">
+                {autoRefreshEnabled 
+                  ? `Auto (${Math.floor((new Date().getTime() - lastUpdateTime.getTime()) / 1000)}s ago)` 
+                  : 'Auto off'}
+              </span>
+            </div>
+            
             <div className="relative">
               <button 
                 onClick={clearNotificationCounter} 
@@ -679,9 +891,9 @@ const Admin = () => {
             
             <button 
               onClick={() => {
-                loadRanks();
-                loadOrderStats();
-                loadPaymentDetails();
+                refreshAllData();
+                setLastUpdateTime(new Date());
+                toast.success('Data refreshed');
               }} 
               className="p-2 rounded-full hover:bg-gray-700 transition-colors"
               title="Refresh data"
@@ -851,7 +1063,7 @@ const Admin = () => {
                       <tr>
                         <th className="p-3 text-left">Rank</th>
                         <th className="p-3 text-left">Price ($)</th>
-                        <th className="p-3 text-left">Color</th>
+                        <th className="p-3 text-left">Gradient</th>
                         <th className="p-3 text-left">Description</th>
                         <th className="p-3 text-right">Actions</th>
                       </tr>
@@ -883,13 +1095,38 @@ const Admin = () => {
                             )}
                           </td>
                           <td className="p-3">
-                            <input
-                              type="text"
-                              value={rank.color}
-                              onChange={(e) => handleRankChange(rank.id, 'color', e.target.value)}
-                              className="bg-gray-900 border border-gray-600 rounded p-1 w-full"
-                            />
-                            <div className={`h-2 w-full rounded mt-1 bg-gradient-to-r ${rank.color}`}></div>
+                            <div className="flex flex-col gap-2">
+                              <div className="flex gap-2">
+                                <input
+                                  type="color"
+                                  value={rank.startColor || '#000000'}
+                                  onChange={(e) => handleRankChange(rank.id, 'startColor', e.target.value)}
+                                  className="w-10 h-6 rounded cursor-pointer"
+                                  title="Start color"
+                                />
+                                <input
+                                  type="color"
+                                  value={rank.endColor || '#ffffff'}
+                                  onChange={(e) => handleRankChange(rank.id, 'endColor', e.target.value)}
+                                  className="w-10 h-6 rounded cursor-pointer"
+                                  title="End color"
+                                />
+                                <select
+                                  className="bg-gray-800 border border-gray-600 rounded text-sm flex-1"
+                                  onChange={(e) => applyGradientPreset(rank.id, e.target.value)}
+                                  value={selectedGradient || ''}
+                                >
+                                  <option value="">Select preset</option>
+                                  {gradientPresets.map(preset => (
+                                    <option key={preset.id} value={preset.id}>{preset.name}</option>
+                                  ))}
+                                </select>
+                              </div>
+                              <div 
+                                className="h-6 w-full rounded"
+                                style={{ background: rank.gradientCss || `linear-gradient(to right, ${rank.startColor || '#000'}, ${rank.endColor || '#fff'})` }}
+                              ></div>
+                            </div>
                           </td>
                           <td className="p-3">
                             <input
@@ -904,7 +1141,8 @@ const Admin = () => {
                               onClick={() => handleUpdateRank(rank.id, {
                                 name: rank.name,
                                 price: rank.price,
-                                color: rank.color,
+                                startColor: rank.startColor,
+                                endColor: rank.endColor,
                                 description: rank.description,
                                 discount: rank.discount
                               })}
@@ -927,15 +1165,71 @@ const Admin = () => {
                     </tbody>
                   </table>
                   
+                  {/* Presets section */}
                   <div className="p-4 border-t border-gray-700">
-                    <button
-                      onClick={handleAddRank}
-                      className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 rounded transition-colors flex items-center"
-                      disabled={saving}
-                    >
-                      <Plus size={16} className="mr-2" />
-                      Add New Rank
-                    </button>
+                    <div className="flex justify-between items-center mb-4">
+                      <h3 className="text-lg font-medium flex items-center">
+                        <Palette size={18} className="text-blue-400 mr-2" />
+                        Gradient Presets
+                      </h3>
+                      <button
+                        onClick={loadGradientPresets}
+                        className="px-2 py-1 bg-gray-700 hover:bg-gray-600 rounded text-sm flex items-center"
+                        disabled={loadingGradients}
+                      >
+                        <RefreshCw size={14} className={`mr-1 ${loadingGradients ? 'animate-spin' : ''}`} />
+                        Refresh Presets
+                      </button>
+                    </div>
+                    
+                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2 mb-4">
+                      {loadingGradients ? (
+                        <div className="col-span-full h-20 flex items-center justify-center">
+                          <RefreshCw size={20} className="animate-spin mr-2" />
+                          <span>Loading gradient presets...</span>
+                        </div>
+                      ) : (
+                        gradientPresets.map(preset => (
+                          <div 
+                            key={preset.id} 
+                            className="h-20 rounded-lg p-2 flex flex-col justify-between border border-gray-700 cursor-pointer hover:border-blue-500 transition-colors"
+                            onClick={() => setSelectedGradient(preset.id)}
+                            style={{ background: preset.preview }}
+                          >
+                            <span className="text-xs font-medium bg-black/50 px-2 py-1 rounded self-start">
+                              {preset.name}
+                            </span>
+                            <div className="flex justify-end">
+                              <span className="text-[10px] bg-black/50 px-1 py-0.5 rounded">
+                                {preset.startColor} → {preset.endColor}
+                              </span>
+                            </div>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                    
+                    <div className="flex items-center justify-between">
+                      <button
+                        onClick={handleAddRank}
+                        className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 rounded transition-colors flex items-center"
+                        disabled={saving}
+                      >
+                        <Plus size={16} className="mr-2" />
+                        Add New Rank
+                      </button>
+                      
+                      <p className="text-sm text-gray-400">
+                        {autoRefreshEnabled ? (
+                          <span className="flex items-center">
+                            <RefreshCw size={14} className="animate-spin-slow mr-1" />
+                            Auto-refresh enabled. Last update: {lastUpdateTime.toLocaleTimeString()}
+                          </span>
+                        ) : (
+                          <span>Real-time updates paused</span>
+                        )}
+                      </p>
+                    </div>
                   </div>
                 </div>
               )}

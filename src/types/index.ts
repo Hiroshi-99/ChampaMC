@@ -25,6 +25,9 @@ export interface RankOption {
   discount_expires_at?: string | null;
   is_discount_active?: boolean;
   discount_days_remaining?: number | null;
+  startColor?: string;
+  endColor?: string;
+  gradientCss?: string;
 }
 
 // Discord webhook types
