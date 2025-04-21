@@ -58,29 +58,60 @@ const isAllowedByCsp = (url: string): boolean => {
 // Fetch and convert a Supabase storage URL to a data URL
 const fetchAndConvertToDataUrl = async (url: string): Promise<string> => {
   try {
-    // Fetch the image using XMLHttpRequest (which doesn't trigger CSP connect-src)
+    if (!url) return '/assets/placeholder-payment.png';
+    
+    // If it's already a data URL, return it directly
+    if (url.startsWith('data:')) {
+      return url;
+    }
+    
+    console.log('Converting to data URL:', url);
+    
+    // Add a timeout to prevent hanging requests
+    const fetchImageWithTimeout = (url: string, timeout: number = 10000): Promise<Blob> => {
+      return new Promise((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        xhr.open('GET', url, true);
+        xhr.responseType = 'blob';
+        
+        const timeoutId = setTimeout(() => {
+          xhr.abort();
+          reject(new Error('Request timed out'));
+        }, timeout);
+        
+        xhr.onload = function() {
+          clearTimeout(timeoutId);
+          
+          if (this.status >= 200 && this.status < 300) {
+            resolve(this.response);
+          } else {
+            reject(new Error(`Failed to load image: ${this.statusText}`));
+          }
+        };
+        
+        xhr.onerror = function() {
+          clearTimeout(timeoutId);
+          reject(new Error('Network error occurred'));
+        };
+        
+        xhr.send();
+      });
+    };
+    
+    // Process the image
+    const blob = await fetchImageWithTimeout(url);
+    
     return new Promise<string>((resolve, reject) => {
-      const xhr = new XMLHttpRequest();
-      xhr.open('GET', url, true);
-      xhr.responseType = 'blob';
-      
-      xhr.onload = function() {
-        if (this.status === 200) {
-          const reader = new FileReader();
-          reader.onloadend = function() {
-            resolve(reader.result as string);
-          };
-          reader.readAsDataURL(this.response);
-        } else {
-          reject(new Error(`Failed to load image: ${this.statusText}`));
-        }
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        console.log('Successfully converted to data URL');
+        resolve(reader.result as string);
       };
-      
-      xhr.onerror = function() {
-        reject(new Error('Network error occurred'));
+      reader.onerror = () => {
+        console.error('Error reading blob as data URL');
+        reject(new Error('Error reading image data'));
       };
-      
-      xhr.send();
+      reader.readAsDataURL(blob);
     });
   } catch (error) {
     console.error('Error converting to data URL:', error);
@@ -118,13 +149,14 @@ const Admin = () => {
   const [gradientPresets, setGradientPresets] = useState<GradientPreset[]>([]);
   const [loadingGradients, setLoadingGradients] = useState(false);
   const [selectedGradient, setSelectedGradient] = useState<string | null>(null);
-  const [autoRefreshEnabled, setAutoRefreshEnabled] = useState(true);
   const [lastUpdateTime, setLastUpdateTime] = useState<Date>(new Date());
   const [orderStatusMap, setOrderStatusMap] = useState<Record<string, string>>({});
   const [orders, setOrders] = useState<Order[]>([]);
   const [loadingOrders, setLoadingOrders] = useState(false);
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
   const [orderDetailsOpen, setOrderDetailsOpen] = useState(false);
+  // Add a loading state for payment proof images  
+  const [paymentProofLoading, setPaymentProofLoading] = useState(false);
 
   // Check authentication status on component mount
   useEffect(() => {
@@ -132,160 +164,50 @@ const Admin = () => {
     loadGradientPresets();
   }, []);
 
-  // Set up polling for orders when authenticated as admin
-  useEffect(() => {
-    let pollInterval: NodeJS.Timeout | null = null;
-    
+  // Enhanced manual refresh function
+  const manualRefresh = useCallback(() => {
     if (isAdmin) {
-      // Instead of using realtime subscriptions (blocked by CSP WebSocket restrictions),
-      // use polling to periodically check for new orders
-      pollInterval = setInterval(async () => {
-        try {
-          // Store the current time to use as a reference
-          const currentPollTime = new Date().toISOString();
-          
-          // Check for new orders since last check
-          const lastOrderTime = realtimeNotifications[0]?.timestamp || new Date().toISOString();
-          
-          // Fetch all recent orders instead of just new ones
-          // This allows us to detect status changes
-          const { data: allOrders, error } = await supabase
-            .from('orders')
-            .select('*')
-            .order('created_at', { ascending: false })
-            .limit(50); // Limit to recent orders for performance
-            
-          if (error) throw error;
-          
-          if (allOrders && allOrders.length > 0) {
-            // First, detect new orders by filtering out ones we've seen
-            const newOrders = allOrders.filter(order => 
-              !orderStatusMap[order.id]
-            );
-            
-            // Then, detect status changes by comparing with our stored statuses
-            const statusChanges = allOrders.filter(order => 
-              orderStatusMap[order.id] && // We've seen this order before
-              orderStatusMap[order.id] !== order.status // Status has changed
-            );
-            
-            // Update our status map with all current statuses
-            const updatedStatusMap = { ...orderStatusMap };
-            allOrders.forEach(order => {
-              updatedStatusMap[order.id] = order.status;
-            });
-            setOrderStatusMap(updatedStatusMap);
-            
-            // Handle new orders
-            if (newOrders.length > 0) {
-              // Add to notifications
-              const newNotifications = newOrders.map(newOrder => ({
-                id: newOrder.id, 
-                type: 'new_order', 
-                message: `New order #${newOrder.id.substring(0, 8)} (${newOrder.status})`,
-                timestamp: newOrder.created_at,
-                data: newOrder
-              }));
-              
-              setRealtimeNotifications(prev => [
-                ...newNotifications,
-                ...prev.slice(0, Math.max(0, 10 - newNotifications.length))
-              ]);
-              
-              // Increment realtime order counter
-              setRealtimeOrderCount(prev => prev + newOrders.length);
-              
-              // Update stats if they exist
-              if (orderStats) {
-                setOrderStats((prev: {
-                  total_orders: number;
-                  pending_orders: number;
-                  [key: string]: any;
-                }) => ({
-                  ...prev,
-                  total_orders: prev.total_orders + newOrders.length,
-                  pending_orders: prev.pending_orders + newOrders.filter(o => o.status === 'pending').length
-                }));
-              }
-              
-              // Show toast notification
-              if (newOrders.length === 1) {
-                toast.success('New order received!', {
-                  icon: '🛒',
-                  duration: 5000,
-                });
-              } else if (newOrders.length > 1) {
-                toast.success(`${newOrders.length} new orders received!`, {
-                  icon: '🛒',
-                  duration: 5000,
-                });
-              }
-            }
-            
-            // Handle status changes
-            if (statusChanges.length > 0) {
-              // Add to notifications
-              const statusNotifications = statusChanges.map(changedOrder => ({
-                id: changedOrder.id + '-' + changedOrder.status, // Make unique ID
-                type: 'updated_order', 
-                message: `Order #${changedOrder.id.substring(0, 8)} updated to ${changedOrder.status}`,
-                timestamp: currentPollTime, // Use current time since we don't have updated_at
-                data: changedOrder
-              }));
-              
-              setRealtimeNotifications(prev => [
-                ...statusNotifications,
-                ...prev.slice(0, Math.max(0, 10 - statusNotifications.length))
-              ]);
-              
-              // Update order stats based on status changes
-              if (orderStats && statusChanges.some(order => ['completed', 'rejected', 'pending'].includes(order.status))) {
-                // We need to recalculate the stats since statuses changed
-                loadOrderStats();
-              }
-              
-              // Show toast for status changes
-              if (statusChanges.length === 1) {
-                const order = statusChanges[0];
-                const statusColor = order.status === 'completed' ? '✅' : 
-                                    order.status === 'rejected' ? '❌' : '⏳';
-                toast.success(`Order #${order.id.substring(0, 8)} ${statusColor} ${order.status}`, {
-                  duration: 5000,
-                });
-              } else if (statusChanges.length > 1) {
-                toast.success(`${statusChanges.length} orders updated`, {
-                  duration: 5000,
-                });
-              }
-            }
-            
-            // Update ordersData state with all fetched orders
-            setOrdersData(allOrders);
-          }
-          
-          // Poll for payment settings changes
-          const { data: settingsData, error: settingsError } = await supabase
-            .from('store_settings')
-            .select('value')
-            .eq('key', 'payment_details')
-            .single();
-          
-          if (!settingsError && settingsData?.value?.qr_image_url && 
-              settingsData.value.qr_image_url !== paymentImageUrl) {
-            setPaymentImageUrl(settingsData.value.qr_image_url);
-            toast.success('Payment details updated', { duration: 3000 });
-          }
-        } catch (error) {
-          console.error('Polling error:', error);
-        }
-      }, 10000); // Poll every 10 seconds
+      Promise.all([
+        loadRanks(),
+        loadOrderStats(),
+        loadPaymentDetails(),
+        loadOrders()
+      ]).then(() => {
+        setLastUpdateTime(new Date());
+        toast.success('Data refreshed successfully');
+      }).catch(error => {
+        console.error('Error refreshing data:', error);
+        toast.error('Failed to refresh data');
+      });
     }
+  }, [isAdmin]);
+
+  // Remove the poll interval from the pollOrdersData effect
+  useEffect(() => {
+    if (!isAdmin) return;
     
-    // Cleanup poll interval on unmount
-    return () => {
-      if (pollInterval) clearInterval(pollInterval);
+    // Initial load of orders data
+    const loadInitialOrdersData = async () => {
+      try {
+        const { data, error } = await supabase
+          .from('orders')
+          .select('*')
+          .order('created_at', { ascending: false })
+          .limit(20);
+        
+        if (error) throw error;
+        
+        if (data) {
+          setOrdersData(data as Order[]);
+        }
+      } catch (error) {
+        console.error('Failed to load orders data:', error);
+      }
     };
-  }, [isAdmin, orderStats, realtimeNotifications, paymentImageUrl, orderStatusMap]);
+    
+    // Load only once, no polling
+    loadInitialOrdersData();
+  }, [isAdmin]);
 
   // Load gradient presets from local data instead of external API
   const loadGradientPresets = async () => {
@@ -925,72 +847,12 @@ const Admin = () => {
   useEffect(() => {
     let intervalId: NodeJS.Timeout | null = null;
     
-    if (isAdmin && autoRefreshEnabled) {
-      // Auto-refresh data every 30 seconds
-      intervalId = setInterval(() => {
-        // Manually refresh all data instead of using real-time subscriptions
-        Promise.all([
-          loadRanks(),
-          loadOrderStats(),
-          loadPaymentDetails()
-        ]).then(() => {
-          console.log('Data refreshed automatically at', new Date().toLocaleTimeString());
-          setLastUpdateTime(new Date());
-        }).catch(error => {
-          console.error('Error in auto-refresh:', error);
-        });
-      }, 30000); // 30 seconds
+    if (isAdmin) {
+      // Initial load of data
+      loadRanks();
+      loadOrderStats();
+      loadPaymentDetails();
     }
-    
-    return () => {
-      if (intervalId) clearInterval(intervalId);
-    };
-  }, [isAdmin, autoRefreshEnabled]);
-
-  // Manual refresh function for refresh button
-  const manualRefresh = () => {
-    Promise.all([
-      loadRanks(),
-      loadOrderStats(),
-      loadPaymentDetails()
-    ]).then(() => {
-      setLastUpdateTime(new Date());
-      toast.success('Data refreshed');
-    }).catch(error => {
-      console.error('Error refreshing data:', error);
-      toast.error('Failed to refresh data');
-    });
-  };
-
-  // Poll for new orders data
-  useEffect(() => {
-    if (!isAdmin) return;
-    
-    const pollOrdersData = async () => {
-      try {
-        const { data, error } = await supabase
-          .from('orders')
-          .select('*')
-          .order('created_at', { ascending: false })
-          .limit(20);
-        
-        if (error) throw error;
-        
-        if (data) {
-          setOrdersData(data as Order[]);
-        }
-      } catch (error) {
-        console.error('Failed to poll orders data:', error);
-      }
-    };
-    
-    // Initial load
-    pollOrdersData();
-    
-    // Set up polling interval
-    const pollInterval = setInterval(pollOrdersData, 15000); // Every 15 seconds
-    
-    return () => clearInterval(pollInterval);
   }, [isAdmin]);
 
   // Function to load orders
@@ -1080,24 +942,48 @@ const Admin = () => {
     setSelectedOrder(order);
     setOrderDetailsOpen(true);
     
+    // Reset states
+    setProxiedPaymentProofUrl('');
+    setPaymentProofLoading(true);
+    
     // Handle payment proof image
     if (order.payment_proof) {
-      const paymentProofUrl = getPublicStorageUrl('payment-proofs', order.payment_proof);
+      // Get the full URL
+      let paymentProofUrl: string;
       
-      // Initially set to placeholder
-      setProxiedPaymentProofUrl('/assets/placeholder-payment.png');
+      // Handle full URLs vs. storage paths
+      if (order.payment_proof.startsWith('http')) {
+        paymentProofUrl = order.payment_proof;
+      } else {
+        paymentProofUrl = getPublicStorageUrl('payment-proofs', order.payment_proof);
+      }
+      
+      console.log('Payment proof URL:', paymentProofUrl);
+      
+      // First check if this URL would be allowed by CSP
+      if (isAllowedByCsp(paymentProofUrl)) {
+        setProxiedPaymentProofUrl(paymentProofUrl);
+        setPaymentProofLoading(false);
+        console.log('Using direct payment proof URL (CSP compliant)');
+        return;
+      }
       
       // Try to convert to data URL in the background
       fetchAndConvertToDataUrl(paymentProofUrl)
-        .then(dataUrl => {
+        .then((dataUrl: string) => {
+          console.log('Successfully converted payment proof to data URL');
           setProxiedPaymentProofUrl(dataUrl);
+          setPaymentProofLoading(false);
+          return dataUrl; // Return to satisfy Promise chain
         })
-        .catch(err => {
+        .catch((err: Error) => {
           console.error('Failed to convert payment proof to data URL:', err);
           setProxiedPaymentProofUrl('/assets/placeholder-payment.png');
+          setPaymentProofLoading(false);
+          return '/assets/placeholder-payment.png'; // Return to satisfy Promise chain
         });
     } else {
-      setProxiedPaymentProofUrl('');
+      setPaymentProofLoading(false);
     }
   };
 
@@ -1206,23 +1092,14 @@ const Admin = () => {
         <div className="max-w-7xl mx-auto flex justify-between items-center">
           <h1 className="text-2xl font-bold">Champa Admin</h1>
           <div className="flex items-center space-x-4">
-            {/* Auto-refresh toggle */}
-            <div className="flex items-center mr-2">
-              <button
-                onClick={() => setAutoRefreshEnabled(!autoRefreshEnabled)}
-                className={`p-2 rounded-full transition-colors relative ${
-                  autoRefreshEnabled ? 'text-emerald-400 hover:bg-emerald-900/30' : 'text-gray-400 hover:bg-gray-700'
-                }`}
-                title={autoRefreshEnabled ? "Auto-refresh is enabled" : "Auto-refresh is disabled"}
-              >
-                <RefreshCw size={18} className={autoRefreshEnabled ? "animate-spin-slow" : ""} />
-              </button>
-              <span className="text-xs text-gray-400 ml-1">
-                {autoRefreshEnabled 
-                  ? `Auto (${Math.floor((new Date().getTime() - lastUpdateTime.getTime()) / 1000)}s ago)` 
-                  : 'Auto off'}
-              </span>
-            </div>
+            {/* Manual refresh button */}
+            <button
+              onClick={manualRefresh}
+              className="p-2 rounded-full hover:bg-gray-700 transition-colors text-emerald-400 hover:bg-emerald-900/30"
+              title="Refresh data"
+            >
+              <RefreshCw size={20} />
+            </button>
             
             <div className="relative">
               <button 
@@ -1282,30 +1159,6 @@ const Admin = () => {
                 </div>
               )}
             </div>
-            
-            <button 
-              onClick={() => {
-                manualRefresh();
-              }} 
-              className="p-2 rounded-full hover:bg-gray-700 transition-colors"
-              title="Refresh data"
-            >
-              <RefreshCw size={20} />
-            </button>
-            <Link 
-              to="/"
-              className="p-2 rounded-full hover:bg-gray-700 transition-colors"
-              title="Go to Store"
-            >
-              <Home size={20} />
-            </Link>
-            <button 
-              onClick={handleLogout} 
-              className="p-2 rounded-full hover:bg-gray-700 transition-colors"
-              title="Sign Out"
-            >
-              <LogOut size={20} />
-            </button>
           </div>
         </div>
       </header>
@@ -1623,14 +1476,10 @@ const Admin = () => {
                       </button>
                       
                       <p className="text-sm text-gray-400">
-                        {autoRefreshEnabled ? (
-                          <span className="flex items-center">
-                            <RefreshCw size={14} className="animate-spin-slow mr-1" />
-                            Auto-refresh enabled. Last update: {lastUpdateTime.toLocaleTimeString()}
-                          </span>
-                        ) : (
-                          <span>Real-time updates paused</span>
-                        )}
+                        <span className="flex items-center">
+                          <Clock size={14} className="mr-1" />
+                          Last update: {lastUpdateTime.toLocaleTimeString()}
+                        </span>
                       </p>
                     </div>
                   </div>
@@ -2182,25 +2031,30 @@ const Admin = () => {
                           <h4 className="text-sm text-gray-400 mb-1">Payment Proof</h4>
                           <div className="bg-gray-700 rounded-lg p-2 flex justify-center">
                             {selectedOrder.payment_proof ? (
-                              <a 
-                                href={proxiedPaymentProofUrl} 
-                                target="_blank" 
-                                rel="noopener noreferrer"
-                                className="block"
-                              >
-                                <img 
-                                  src={isAllowedByCsp(proxiedPaymentProofUrl) 
-                                    ? proxiedPaymentProofUrl
-                                    : '/assets/placeholder-payment.png'
-                                  } 
-                                  alt="Payment proof" 
-                                  className="max-h-60 max-w-full object-contain rounded shadow-lg"
-                                  onError={(e) => {
-                                    console.log("Failed to load payment proof, using placeholder");
-                                    e.currentTarget.src = '/assets/placeholder-payment.png';
-                                  }}
-                                />
-                              </a>
+                              paymentProofLoading ? (
+                                <div className="p-8 text-center text-gray-400">
+                                  <div className="animate-spin rounded-full h-8 w-8 border-2 border-b-transparent border-emerald-500 mx-auto mb-2"></div>
+                                  <p>Loading payment proof...</p>
+                                </div>
+                              ) : (
+                                <a 
+                                  href={proxiedPaymentProofUrl} 
+                                  target="_blank" 
+                                  rel="noopener noreferrer"
+                                  className="block"
+                                >
+                                  <img 
+                                    src={proxiedPaymentProofUrl || '/assets/placeholder-payment.png'} 
+                                    alt="Payment proof" 
+                                    className="max-h-60 max-w-full object-contain rounded shadow-lg"
+                                    onError={(e) => {
+                                      console.error("Failed to load payment proof, using placeholder");
+                                      e.currentTarget.src = '/assets/placeholder-payment.png';
+                                    }}
+                                    onLoad={() => console.log("Payment proof image loaded successfully")}
+                                  />
+                                </a>
+                              )
                             ) : (
                               <div className="p-8 text-center text-gray-400">
                                 <Upload size={36} className="mx-auto mb-2 opacity-30" />
